@@ -25,8 +25,8 @@ set -e
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-VERSION="1.0.0-beta4"
-WHEEL_VERSION="1.0.0b4"
+VERSION="1.0.0-beta5"
+WHEEL_VERSION="1.0.0b5"
 DIST_REPO="sthenos-security/reach-dist"
 DIST_URL="https://github.com/${DIST_REPO}/releases/download/v${VERSION}"
 
