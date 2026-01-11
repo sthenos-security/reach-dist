@@ -19,12 +19,20 @@ REACHABLE uses [Sigstore](https://sigstore.dev) cosign for cryptographic signing
 ## Quick Verification
 
 ```bash
+# Set version and platform
+VERSION="1.0.0-beta4"
+WHEEL_VERSION="1.0.0b4"
+PYTHON="cp311"
+PLATFORM="macosx_14_0_arm64"  # See platform options below
+
+# Construct wheel name
+WHEEL="reachable-${WHEEL_VERSION}-${PYTHON}-${PYTHON}-${PLATFORM}.whl"
+
 # Download files
-VERSION="4.5.9"
-WHEEL="reachable-${VERSION}-cp311-cp311-macosx_14_0_arm64.whl"
-curl -LO "https://github.com/sthenos-security/reach-dist/releases/download/v${VERSION}/${WHEEL}"
-curl -LO "https://github.com/sthenos-security/reach-dist/releases/download/v${VERSION}/${WHEEL}.sig"
-curl -LO "https://github.com/sthenos-security/reach-dist/releases/download/v${VERSION}/${WHEEL}.crt"
+BASE_URL="https://github.com/sthenos-security/reach-dist/releases/download/v${VERSION}"
+curl -LO "${BASE_URL}/${WHEEL}"
+curl -LO "${BASE_URL}/${WHEEL}.sig"
+curl -LO "${BASE_URL}/${WHEEL}.crt"
 
 # Verify
 cosign verify-blob \
@@ -36,6 +44,28 @@ cosign verify-blob \
 
 # Expected output: Verified OK
 ```
+
+---
+
+## Supported Platforms
+
+| Platform | Architecture | Platform Tag |
+|----------|--------------|--------------|
+| Linux | x86_64 | `manylinux_2_28_x86_64` |
+| Linux | ARM64 | `manylinux_2_28_aarch64` |
+| macOS | Apple Silicon | `macosx_14_0_arm64` |
+
+> **Note:** macOS Intel wheels are not currently available.
+
+### Python Version Tags
+
+| Python | Tag |
+|--------|-----|
+| 3.10 | `cp310` |
+| 3.11 | `cp311` |
+| 3.12 | `cp312` |
+| 3.13 | `cp313` |
+| 3.14 | `cp314` |
 
 ---
 
@@ -88,26 +118,26 @@ The certificate proves **who** signed the artifact:
 
 ```bash
 # View certificate details
-openssl x509 -in reachable-4.5.9-*.whl.crt -text -noout | grep -A2 "Subject Alternative Name"
+openssl x509 -in reachable-*.whl.crt -text -noout | grep -A2 "Subject Alternative Name"
 ```
 
 Output:
 ```
 X509v3 Subject Alternative Name: critical
-    URI:https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v4.5.9
+    URI:https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v1.0.0-beta4
 ```
 
 This proves:
 - **Repo:** `sthenos-security/reach-core`
 - **Workflow:** `.github/workflows/release.yml`
-- **Tag:** `v4.5.9`
+- **Tag:** `v1.0.0-beta4`
 
 ### What the Signature Proves
 
 | Claim | Proof |
 |-------|-------|
 | Built by Sthenos Security | Certificate identity matches `sthenos-security/*` |
-| Built at specific version | Certificate contains `@refs/tags/v4.5.9` |
+| Built at specific version | Certificate contains `@refs/tags/v1.0.0-beta4` |
 | Not tampered | Signature validates against wheel SHA256 |
 | Publicly logged | Entry exists in Rekor transparency log |
 
@@ -119,11 +149,11 @@ If you can't install cosign:
 
 ```bash
 # Download checksums
-curl -LO https://github.com/sthenos-security/reach-dist/releases/download/v4.5.9/SHA256SUMS
+curl -LO https://github.com/sthenos-security/reach-dist/releases/download/v1.0.0-beta4/checksums.sha256
 
 # Verify
-sha256sum -c SHA256SUMS
-# Expected: reachable-4.5.9-cp311-cp311-macosx_14_0_arm64.whl: OK
+sha256sum -c checksums.sha256 --ignore-missing
+# Expected: reachable-1.0.0b4-cp311-cp311-macosx_14_0_arm64.whl: OK
 ```
 
 **⚠️ Checksums verify integrity but NOT authenticity.** An attacker could replace both the wheel and checksums. Use cosign for full verification.
@@ -138,7 +168,7 @@ Every signature is permanently logged in [Rekor](https://rekor.sigstore.dev), Si
 
 ```bash
 # Get SHA256 of the wheel
-DIGEST=$(sha256sum reachable-4.5.9-*.whl | cut -d' ' -f1)
+DIGEST=$(sha256sum reachable-*.whl | cut -d' ' -f1)
 
 # Search Rekor (requires rekor-cli)
 rekor-cli search --sha "$DIGEST"
@@ -161,12 +191,12 @@ For air-gapped environments:
 
 ```bash
 cosign verify-blob \
-  --certificate reachable-4.5.9-*.whl.crt \
-  --signature reachable-4.5.9-*.whl.sig \
+  --certificate reachable-*.whl.crt \
+  --signature reachable-*.whl.sig \
   --certificate-identity-regexp "https://github.com/sthenos-security/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --insecure-ignore-tlog \
-  reachable-4.5.9-*.whl
+  reachable-*.whl
 ```
 
 **Note:** `--insecure-ignore-tlog` skips Rekor check. The signature is still cryptographically verified.
@@ -215,7 +245,7 @@ fi
 Usage:
 ```bash
 chmod +x verify-reachable.sh
-./verify-reachable.sh reachable-4.5.9-cp311-cp311-macosx_14_0_arm64.whl
+./verify-reachable.sh reachable-1.0.0b4-cp311-cp311-macosx_14_0_arm64.whl
 ```
 
 ---
@@ -252,4 +282,4 @@ Rekor doesn't have a record. Possible causes:
 
 ## Questions?
 
-Contact: support@sthenosec.com
+Contact: adazzi@sthenosec.com

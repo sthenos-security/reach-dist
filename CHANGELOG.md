@@ -2,30 +2,62 @@
 
 All notable changes to REACHABLE are documented here.
 
-## Version Numbering
+---
 
-| Public Version | Internal Version | Status |
-|----------------|------------------|--------|
-| 1.0.0-beta1 | 4.6.0 | Current |
-| 1.0.0 | 4.6.x (stable) | Planned GA |
+## [1.0.0-beta4] - 2026-01-11
+
+### Added
+- Multi-Python wheel support: Python 3.10, 3.11, 3.12, 3.13, 3.14
+- Multi-platform support: Linux (x86_64, ARM64), macOS (Apple Silicon)
+- 15 wheels per release (5 Python versions × 3 platforms)
+- Automated installer script (`install.sh`)
+- CI/CD-based wheel builds via GitHub Actions
+
+### Changed
+- `requires-python` updated to `>=3.10`
+- Wheel naming convention with explicit `cpXYZ` tags
+- Release process now fully automated via CI/CD
+
+### Removed
+- macOS Intel (x86_64) wheels (GitHub retired Intel Mac runners)
+- Intel Mac users can install from source
+
+---
+
+## [1.0.0-beta3] - 2026-01-11
+
+### Added
+- Initial multi-Python wheel builds
+- Platform matrix documentation
+
+### Changed
+- CI/CD workflow for multi-platform builds
+
+---
+
+## [1.0.0-beta2] - 2026-01-11
+
+### Added
+- `reachctl primer` command for quick-start guide
+- `reachctl sandbox` no-arg fix (defaults to --status)
+- Version display with git commit info
+
+### Changed
+- Improved selftest output formatting
 
 ---
 
 ## [1.0.0-beta1] - 2026-01-10
 
-*Internal version: 4.6.0*
-
 ### Added
 - Comprehensive platform dependencies documentation
-- Dependency map showing pip vs system installations
 - Storage cleanup with filesystem + database trimming
 - Per-repository database (repo.db) architecture
 - Distribution repository with platform-specific wheels
 
 ### Changed
 - Public versioning scheme (1.0.0-betaN for pre-release)
-- GuardDog isolated venv location now respects REACHABLE_CACHE_DIR
-- Improved CI/CD caching documentation
+- GuardDog isolated venv location
 
 ### Fixed
 - Database storage path consistency
@@ -33,44 +65,27 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
-## Pre-release History (Internal Versions)
+## Wheel Matrix
 
-### [4.5.9] - 2026-01-10
-- Platform dependencies documentation
-- Dependency map creation
-- Distribution repo setup
+Each release includes **15 wheels**:
 
-### [4.5.8] - 2026-01-09
-- Per-repository SQLite database (repo.db)
-- Historical scan tracking with branch/commit metadata
-- `reachctl db --status/--trim/--optimize` commands
+| Platform | Architecture | Python Versions |
+|----------|--------------|-----------------|
+| Linux | x86_64 | 3.10, 3.11, 3.12, 3.13, 3.14 |
+| Linux | ARM64 | 3.10, 3.11, 3.12, 3.13, 3.14 |
+| macOS | Apple Silicon | 3.10, 3.11, 3.12, 3.13, 3.14 |
 
-### [4.5.7] - 2026-01-08
-- Executive dashboard with risk posture indicators
-- Noise reduction metrics and workload calculations
-- Branding integration (Sthenos logo)
+> **Note:** macOS Intel wheels not available. Contact support if needed.
 
-### [4.5.0] - 2026-01-01
-- CI/CD integration flags: `--fail-on`, `--format`, `--quiet`
-- SARIF output for GitHub Security tab
-- Markdown report generation
+---
 
-### [4.4.0] - 2025-12-15
-- 11 compliance frameworks (FedRAMP, CMMC 2.0, HIPAA, etc.)
-- CWE-based policy mapping
-- Threat intelligence integration
+## Platform Tags Reference
 
-### [4.3.0] - 2025-12-01
-- GuardDog malware detection integration
-- Semgrep secrets scanning
-- Dynamic malware sandbox (Colima on macOS)
-
-### [4.0.0] - 2025-11-01
-- Multi-language support (Python, JavaScript, Go, Java, Rust)
-- Reachability analysis engine
-- Interactive HTML dashboard
-- Complete architecture rewrite
-- New CLI: `reachctl`
+| Tag | Platform |
+|-----|----------|
+| `manylinux_2_28_x86_64` | Linux x86_64 |
+| `manylinux_2_28_aarch64` | Linux ARM64 |
+| `macosx_14_0_arm64` | macOS Apple Silicon |
 
 ---
 
