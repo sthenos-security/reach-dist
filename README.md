@@ -6,11 +6,18 @@ Official distribution repository for REACHABLE wheel packages.
 
 ## Quick Install
 
+1. Download `install.sh` from this repository (Releases or Code tab)
+2. Run it:
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+bash install.sh
 ```
 
-The installer automatically detects your OS, architecture, and Python version, then downloads and installs the correct wheel.
+3. Enter your GitHub Personal Access Token when prompted
+   - Create one at: https://github.com/settings/tokens (with `repo` scope)
+   - Or set `export GITHUB_TOKEN=ghp_xxx` before running
+
+The installer auto-detects your OS, architecture, and Python version, then downloads the correct wheel.
 
 ---
 

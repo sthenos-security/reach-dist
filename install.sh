@@ -28,6 +28,34 @@ set -e
 VERSION="1.0.0-beta5"
 WHEEL_VERSION="1.0.0b5"
 DIST_REPO="sthenos-security/reach-dist"
+
+# -----------------------------------------------------------------------------
+# GitHub Authentication
+# -----------------------------------------------------------------------------
+if [[ -z "$GITHUB_TOKEN" ]]; then
+    echo ""
+    echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo -e "\033[0;34m  REACHABLE Private Distribution\033[0m"
+    echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+    echo ""
+    echo "  A GitHub Personal Access Token is required."
+    echo "  Use your own GitHub account token (with 'repo' scope)."
+    echo ""
+    echo "  Create one at: https://github.com/settings/tokens"
+    echo "  Or set: export GITHUB_TOKEN=ghp_xxxx"
+    echo ""
+    read -sp "  Enter GitHub Token: " GITHUB_TOKEN
+    echo ""
+    echo ""
+fi
+
+if [[ -z "$GITHUB_TOKEN" ]]; then
+    echo -e "\033[0;31m❌ GitHub token required.\033[0m"
+    echo "  Set GITHUB_TOKEN env var or enter when prompted."
+    exit 1
+fi
+
+# Base URL for releases (no token - auth via header)
 DIST_URL="https://github.com/${DIST_REPO}/releases/download/v${VERSION}"
 
 # -----------------------------------------------------------------------------
@@ -201,7 +229,7 @@ detect_environment() {
     echo -e "  ${BOLD}Download Source${NC}"
     echo -e "  ─────────────────────────────────────────────────────────────"
     print_detail "Repository:" "github.com/$DIST_REPO"
-    print_detail "URL:" "$WHEEL_URL"
+    print_detail "Release:" "v$VERSION"
 }
 
 # -----------------------------------------------------------------------------
@@ -215,10 +243,16 @@ download_and_install() {
     
     print_info "Downloading from $DIST_REPO..."
     
+    # Use Authorization header for private repo
     if [[ "$DOWNLOADER" == "curl" ]]; then
-        HTTP_CODE=$(curl -fsSL -w "%{http_code}" -o "$WHEEL_PATH" "$WHEEL_URL" 2>/dev/null) || HTTP_CODE="000"
+        HTTP_CODE=$(curl -fsSL \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            -w "%{http_code}" \
+            -o "$WHEEL_PATH" \
+            "$WHEEL_URL" 2>/dev/null) || HTTP_CODE="000"
     else
-        if wget -q -O "$WHEEL_PATH" "$WHEEL_URL" 2>/dev/null; then
+        if wget -q --header="Authorization: token ${GITHUB_TOKEN}" -O "$WHEEL_PATH" "$WHEEL_URL" 2>/dev/null; then
             HTTP_CODE="200"
         else
             HTTP_CODE="404"
