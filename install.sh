@@ -8,7 +8,7 @@
 #  ██║  ██║███████╗██║  ██║╚██████╗██║  ██║██║  ██║██████╔╝███████╗███████╗
 #  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚══════╝
 #
-#  Installer (Direct Download Edition)
+#  REACHABLE Installer
 #  Copyright © 2026 Sthenos Security. All rights reserved.
 #
 #  Usage:
@@ -170,10 +170,8 @@ detect_environment() {
     # Check for curl or wget
     if command -v curl &> /dev/null; then
         DOWNLOADER="curl"
-        DOWNLOAD_CMD="curl -fsSL -o"
     elif command -v wget &> /dev/null; then
         DOWNLOADER="wget"
-        DOWNLOAD_CMD="wget -q -O"
     else
         print_error "Neither curl nor wget found"
         exit 1
@@ -328,7 +326,7 @@ print_success() {
     echo ""
     echo -e "  ${BOLD}Documentation${NC}"
     echo ""
-    echo "    https://github.com/sthenos-security/reach-core/docs"
+    echo "    https://github.com/sthenos-security/reach-core/tree/main/docs"
     echo ""
     echo -e "  ${BOLD}Support${NC}"
     echo ""
