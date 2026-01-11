@@ -8,7 +8,7 @@
 #  ██║  ██║███████╗██║  ██║╚██████╗██║  ██║██║  ██║██████╔╝███████╗███████╗
 #  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚══════╝
 #
-#  REACHABLE Installer
+#  Installer (Direct Download Edition)
 #  Copyright © 2026 Sthenos Security. All rights reserved.
 #
 #  Usage:
@@ -25,8 +25,8 @@ set -e
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-VERSION="1.0.0-beta3"
-WHEEL_VERSION="1.0.0b3"
+VERSION="1.0.0-beta4"
+WHEEL_VERSION="1.0.0b4"
 DIST_REPO="sthenos-security/reach-dist"
 DIST_URL="https://github.com/${DIST_REPO}/releases/download/v${VERSION}"
 
@@ -154,7 +154,12 @@ detect_environment() {
         if [[ "$ARCH" == "arm64" ]]; then
             PLATFORM_TAG="macosx_14_0_arm64"
         else
-            PLATFORM_TAG="macosx_13_0_x86_64"
+            print_error "macOS Intel (x86_64) wheels are not currently available."
+            echo ""
+            echo "  Options:"
+            echo "    1. Install from source: pip install git+https://github.com/sthenos-security/reach-core.git"
+            echo "    2. Contact support: adazzi@sthenosec.com"
+            exit 1
         fi
     else
         if [[ "$ARCH" == "aarch64" ]]; then
@@ -170,8 +175,10 @@ detect_environment() {
     # Check for curl or wget
     if command -v curl &> /dev/null; then
         DOWNLOADER="curl"
+        DOWNLOAD_CMD="curl -fsSL -o"
     elif command -v wget &> /dev/null; then
         DOWNLOADER="wget"
+        DOWNLOAD_CMD="wget -q -O"
     else
         print_error "Neither curl nor wget found"
         exit 1
@@ -326,7 +333,7 @@ print_success() {
     echo ""
     echo -e "  ${BOLD}Documentation${NC}"
     echo ""
-    echo "    https://github.com/sthenos-security/reach-core/tree/main/docs"
+    echo "    https://github.com/sthenos-security/reach-core/docs"
     echo ""
     echo -e "  ${BOLD}Support${NC}"
     echo ""

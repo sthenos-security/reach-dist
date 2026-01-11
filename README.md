@@ -18,7 +18,9 @@ The installer automatically detects your OS, architecture, and Python version, t
 
 - **Python:** 3.10, 3.11, 3.12, 3.13, or 3.14
 - **OS:** Linux or macOS
-- **Architecture:** x86_64 or ARM64
+- **Architecture:** x86_64 (Linux only) or ARM64
+
+> **Note:** macOS Intel is not currently supported. Contact adazzi@sthenosec.com if needed.
 
 ---
 
@@ -77,21 +79,22 @@ reachable-VERSION-cpXYZ-cpXYZ-PLATFORM.whl
 |-----|----------|--------------|
 | `manylinux_2_28_x86_64` | Linux | x86_64 (Intel/AMD) |
 | `manylinux_2_28_aarch64` | Linux | ARM64 |
-| `macosx_13_0_x86_64` | macOS | Intel |
 | `macosx_14_0_arm64` | macOS | Apple Silicon (M1/M2/M3/M4) |
+
+> **Note:** macOS Intel wheels are not currently available. Intel Mac users can install from source.
 
 ---
 
 ## Wheel Matrix
 
-Each release includes **20 wheels** (5 Python versions × 4 platforms):
+Each release includes **15 wheels** (5 Python versions × 3 platforms):
 
 | Platform | Architecture | cp310 | cp311 | cp312 | cp313 | cp314 |
 |----------|--------------|-------|-------|-------|-------|-------|
 | Linux | x86_64 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Linux | ARM64 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| macOS | Intel | ✅ | ✅ | ✅ | ✅ | ✅ |
 | macOS | Apple Silicon | ✅ | ✅ | ✅ | ✅ | ✅ |
+| macOS | Intel | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ### Examples
 
@@ -99,7 +102,6 @@ Each release includes **20 wheels** (5 Python versions × 4 platforms):
 |--------|--------|-------|
 | Ubuntu 22.04, Intel | 3.11 | `reachable-*-cp311-cp311-manylinux_2_28_x86_64.whl` |
 | Ubuntu 24.04, ARM (AWS Graviton) | 3.12 | `reachable-*-cp312-cp312-manylinux_2_28_aarch64.whl` |
-| macOS Ventura, Intel | 3.10 | `reachable-*-cp310-cp310-macosx_13_0_x86_64.whl` |
 | macOS Sonoma, M3 | 3.13 | `reachable-*-cp313-cp313-macosx_14_0_arm64.whl` |
 
 ---
