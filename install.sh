@@ -30,33 +30,35 @@ WHEEL_VERSION="1.0.0b5"
 DIST_REPO="sthenos-security/reach-dist"
 
 # -----------------------------------------------------------------------------
-# GitHub Authentication
+# GitHub Authentication (called only for remote installs)
 # -----------------------------------------------------------------------------
-if [[ -z "$GITHUB_TOKEN" ]]; then
-    echo ""
-    echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-    echo -e "\033[0;34m  REACHABLE Private Distribution\033[0m"
-    echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
-    echo ""
-    echo "  A GitHub Personal Access Token is required."
-    echo "  Use your own GitHub account token (with 'repo' scope)."
-    echo ""
-    echo "  Create one at: https://github.com/settings/tokens"
-    echo "  Or set: export GITHUB_TOKEN=ghp_xxxx"
-    echo ""
-    read -sp "  Enter GitHub Token: " GITHUB_TOKEN
-    echo ""
-    echo ""
-fi
+require_github_auth() {
+    if [[ -z "$GITHUB_TOKEN" ]]; then
+        echo ""
+        echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+        echo -e "\033[0;34m  REACHABLE Private Distribution\033[0m"
+        echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+        echo ""
+        echo "  A GitHub Personal Access Token is required."
+        echo "  Use your own GitHub account token (with 'repo' scope)."
+        echo ""
+        echo "  Create one at: https://github.com/settings/tokens"
+        echo "  Or set: export GITHUB_TOKEN=ghp_xxxx"
+        echo ""
+        read -sp "  Enter GitHub Token: " GITHUB_TOKEN
+        echo ""
+        echo ""
+    fi
 
-if [[ -z "$GITHUB_TOKEN" ]]; then
-    echo -e "\033[0;31m❌ GitHub token required.\033[0m"
-    echo "  Set GITHUB_TOKEN env var or enter when prompted."
-    exit 1
-fi
+    if [[ -z "$GITHUB_TOKEN" ]]; then
+        echo -e "\033[0;31m❌ GitHub token required.\033[0m"
+        echo "  Set GITHUB_TOKEN env var or enter when prompted."
+        exit 1
+    fi
 
-# Base URL for releases (no token - auth via header)
-DIST_URL="https://github.com/${DIST_REPO}/releases/download/v${VERSION}"
+    # Base URL for releases (no token - auth via header)
+    DIST_URL="https://github.com/${DIST_REPO}/releases/download/v${VERSION}"
+}
 
 # -----------------------------------------------------------------------------
 # Colors & Formatting
@@ -277,27 +279,8 @@ download_and_install() {
     WHEEL_SIZE=$(du -h "$WHEEL_PATH" | cut -f1)
     print_ok "Downloaded ($WHEEL_SIZE)"
     
-    # Uninstall previous version
-    if $PYTHON_CMD -m pip show reachable &> /dev/null; then
-        print_step "Removing previous installation"
-        $PYTHON_CMD -m pip uninstall reachable -y -q
-        print_ok "Previous version removed"
-    fi
-    
-    # Install
-    print_step "Installing REACHABLE"
-    print_info "Running pip install..."
-    
-    if $PYTHON_CMD -m pip install "$WHEEL_PATH" -q 2>&1; then
-        print_ok "Installation complete"
-    else
-        print_error "Installation failed"
-        echo ""
-        echo "  Try installing manually:"
-        echo "    pip install $WHEEL_PATH"
-        rm -rf "$DOWNLOAD_DIR"
-        exit 1
-    fi
+    # Use the common install_local_wheel function
+    install_local_wheel "$WHEEL_PATH"
     
     # Cleanup
     rm -rf "$DOWNLOAD_DIR"
@@ -309,28 +292,22 @@ download_and_install() {
 verify_installation() {
     print_header "Verification"
     
-    # Find reachctl
-    if command -v reachctl &> /dev/null; then
-        REACHCTL_PATH=$(command -v reachctl)
-    else
-        # Check common pip install locations
-        for path in ~/.local/bin/reachctl /usr/local/bin/reachctl; do
-            if [[ -x "$path" ]]; then
-                REACHCTL_PATH="$path"
-                break
-            fi
-        done
-    fi
+    # Check the standard install location
+    REACHCTL_PATH="$HOME/.reachable/bin/reachctl"
     
-    if [[ -z "$REACHCTL_PATH" ]]; then
-        print_warn "reachctl not in PATH"
-        echo ""
-        echo "  Add to your PATH:"
-        echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
-        echo ""
-        echo "  Or run directly:"
-        echo "    ~/.local/bin/reachctl --version"
-        return
+    if [[ ! -x "$REACHCTL_PATH" ]]; then
+        # Fallback: check if in PATH
+        if command -v reachctl &> /dev/null; then
+            REACHCTL_PATH=$(command -v reachctl)
+        else
+            print_warn "reachctl not found"
+            echo ""
+            echo "  Expected at: ~/.reachable/bin/reachctl"
+            echo ""
+            echo "  Add to your PATH (add to ~/.zshrc or ~/.bashrc):"
+            echo "    export PATH=\"\$HOME/.reachable/bin:\$PATH\""
+            return
+        fi
     fi
     
     echo ""
@@ -376,9 +353,101 @@ print_success() {
 }
 
 # -----------------------------------------------------------------------------
+# Install from local wheel (for testing)
+# -----------------------------------------------------------------------------
+install_local_wheel() {
+    local WHEEL_PATH="$1"
+    
+    print_step "Installing from local wheel"
+    print_info "$WHEEL_PATH"
+    
+    if [[ ! -f "$WHEEL_PATH" ]]; then
+        print_error "Wheel file not found: $WHEEL_PATH"
+        exit 1
+    fi
+    
+    WHEEL_SIZE=$(du -h "$WHEEL_PATH" | cut -f1)
+    print_ok "Found ($WHEEL_SIZE)"
+    
+    # Detect Python
+    if command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+    elif command -v python &> /dev/null; then
+        PYTHON_CMD="python"
+    else
+        print_error "Python not found"
+        exit 1
+    fi
+    
+    # Create ~/.reachable structure
+    INSTALL_DIR="$HOME/.reachable"
+    VENV_DIR="$INSTALL_DIR/venv"
+    BIN_DIR="$INSTALL_DIR/bin"
+    
+    print_step "Creating installation directory"
+    mkdir -p "$INSTALL_DIR"
+    mkdir -p "$BIN_DIR"
+    print_ok "Created $INSTALL_DIR"
+    
+    # Create venv
+    print_step "Creating virtual environment"
+    if [[ -d "$VENV_DIR" ]]; then
+        print_info "Removing existing venv..."
+        rm -rf "$VENV_DIR"
+    fi
+    $PYTHON_CMD -m venv "$VENV_DIR"
+    print_ok "Created venv"
+    
+    # Install wheel into venv
+    print_step "Installing REACHABLE into venv"
+    "$VENV_DIR/bin/pip" install --upgrade pip -q
+    "$VENV_DIR/bin/pip" install "$WHEEL_PATH" -q
+    print_ok "Installed"
+    
+    # Create symlink in bin/
+    print_step "Creating reachctl symlink"
+    rm -f "$BIN_DIR/reachctl"
+    ln -s "$VENV_DIR/bin/reachctl" "$BIN_DIR/reachctl"
+    print_ok "$BIN_DIR/reachctl -> venv/bin/reachctl"
+    
+    # Update PATH in shell config
+    print_step "Configuring PATH"
+    SHELL_RC="$HOME/.zshrc"
+    [[ -f "$HOME/.bashrc" ]] && [[ ! -f "$HOME/.zshrc" ]] && SHELL_RC="$HOME/.bashrc"
+    
+    # Remove old PATH entries and add new one
+    if [[ -f "$SHELL_RC" ]]; then
+        # Remove any existing reachable PATH entries
+        if [[ "$(uname)" == "Darwin" ]]; then
+            sed -i '' '/REACHABLE/d' "$SHELL_RC" 2>/dev/null || true
+            sed -i '' '/\.reachable/d' "$SHELL_RC" 2>/dev/null || true
+        else
+            sed -i '/REACHABLE/d' "$SHELL_RC" 2>/dev/null || true
+            sed -i '/\.reachable/d' "$SHELL_RC" 2>/dev/null || true
+        fi
+    fi
+    
+    echo '' >> "$SHELL_RC"
+    echo '# REACHABLE - Security Analysis Tool' >> "$SHELL_RC"
+    echo 'export PATH="$HOME/.reachable/bin:$PATH"' >> "$SHELL_RC"
+    print_ok "Added to $SHELL_RC"
+}
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 main() {
+    # Check if local wheel path provided as argument
+    if [[ -n "$1" ]] && [[ -f "$1" ]]; then
+        print_header "REACHABLE Local Install"
+        install_local_wheel "$1"
+        verify_installation
+        print_success
+        return
+    fi
+    
+    # Normal remote installation - requires GitHub auth
+    require_github_auth
     print_header "REACHABLE Installer v${VERSION}"
     
     detect_environment

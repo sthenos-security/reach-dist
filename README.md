@@ -154,11 +154,11 @@ rm -rf ~/.reachable  # Optional: remove data
 
 ### "Command not found: reachctl"
 
-Add pip's bin directory to your PATH:
+Add REACHABLE's bin directory to your PATH:
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.reachable/bin:$PATH"
 ```
 
 ### "No matching distribution found"
@@ -175,12 +175,11 @@ python3 -c "import platform; print(platform.machine())"
 
 ### Permission Errors
 
-Use a virtual environment:
+The installer creates its own isolated environment at `~/.reachable/venv`. If you encounter permission issues, try:
 
 ```bash
-python3 -m venv ~/.reachable-venv
-source ~/.reachable-venv/bin/activate
-pip install <wheel-file>.whl
+rm -rf ~/.reachable
+bash install.sh
 ```
 
 ---
