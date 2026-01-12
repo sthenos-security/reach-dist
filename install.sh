@@ -404,6 +404,88 @@ install_local_wheel() {
     "$VENV_DIR/bin/pip" install "$WHEEL_PATH" -q
     print_ok "Installed"
     
+    # Install required Python tools (semgrep)
+    print_step "Installing Python tools"
+    "$VENV_DIR/bin/pip" install semgrep -q 2>/dev/null && print_ok "semgrep" || print_warn "semgrep install failed"
+    
+    # Create isolated guarddog venv (has dependency conflicts with main venv)
+    print_step "Installing guarddog (isolated venv)"
+    GUARDDOG_VENV="$INSTALL_DIR/guarddog-venv"
+    if [[ -d "$GUARDDOG_VENV" ]]; then
+        rm -rf "$GUARDDOG_VENV"
+    fi
+    
+    # On macOS, install libgit2 first (required for pygit2, a guarddog dependency)
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if ! brew list libgit2 &>/dev/null; then
+            if command -v brew &>/dev/null; then
+                print_info "Installing libgit2 (required for guarddog)..."
+                if brew install libgit2 >/dev/null 2>&1; then
+                    print_ok "libgit2"
+                else
+                    print_warn "libgit2 install failed - guarddog may not work"
+                fi
+            else
+                print_warn "Homebrew not found - cannot install libgit2"
+                print_info "Install Homebrew: https://brew.sh, then: brew install libgit2"
+            fi
+        fi
+    fi
+    
+    $PYTHON_CMD -m venv "$GUARDDOG_VENV"
+    "$GUARDDOG_VENV/bin/pip" install --upgrade pip -q
+    "$GUARDDOG_VENV/bin/pip" install guarddog -q 2>/dev/null && print_ok "guarddog" || print_warn "guarddog install failed"
+    
+    # Install syft and grype to tools/bin/ (pinned versions, no system dependency)
+    print_step "Installing security scanners"
+    TOOLS_BIN="$INSTALL_DIR/tools/bin"
+    mkdir -p "$TOOLS_BIN"
+    
+    # Pinned versions
+    SYFT_VERSION="1.18.1"
+    GRYPE_VERSION="0.84.0"
+    
+    # Install syft
+    if [[ ! -x "$TOOLS_BIN/syft" ]]; then
+        print_info "Installing syft v$SYFT_VERSION..."
+        if curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$TOOLS_BIN" "v$SYFT_VERSION" >/dev/null 2>&1; then
+            print_ok "syft $SYFT_VERSION"
+        else
+            print_warn "syft install failed"
+        fi
+    else
+        print_ok "syft (already installed)"
+    fi
+    
+    # Install grype
+    if [[ ! -x "$TOOLS_BIN/grype" ]]; then
+        print_info "Installing grype v$GRYPE_VERSION..."
+        if curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "$TOOLS_BIN" "v$GRYPE_VERSION" >/dev/null 2>&1; then
+            print_ok "grype $GRYPE_VERSION"
+        else
+            print_warn "grype install failed"
+        fi
+    else
+        print_ok "grype (already installed)"
+    fi
+    
+    # Pre-populate grype vulnerability database (so first scan is fast)
+    print_step "Initializing vulnerability database"
+    GRYPE_DB_DIR="$INSTALL_DIR/cache/grype-db"
+    mkdir -p "$GRYPE_DB_DIR"
+    
+    if [[ -x "$TOOLS_BIN/grype" ]]; then
+        print_info "Downloading vulnerability database (this may take a minute)..."
+        export GRYPE_DB_CACHE_DIR="$GRYPE_DB_DIR"
+        if "$TOOLS_BIN/grype" db update >/dev/null 2>&1; then
+            print_ok "Grype DB initialized"
+            # Record timestamp
+            date +%s > "$GRYPE_DB_DIR/.last_update"
+        else
+            print_warn "DB download failed (will retry on first scan)"
+        fi
+    fi
+    
     # Create symlink in bin/
     print_step "Creating reachctl symlink"
     rm -f "$BIN_DIR/reachctl"
