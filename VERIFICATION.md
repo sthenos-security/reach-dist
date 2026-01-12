@@ -20,10 +20,10 @@ REACHABLE uses [Sigstore](https://sigstore.dev) cosign for cryptographic signing
 
 ```bash
 # Set version and platform
-VERSION="1.0.0-beta4"
-WHEEL_VERSION="1.0.0b4"
+VERSION="1.0.0-beta7"
+WHEEL_VERSION="1.0.0b7"
 PYTHON="cp311"
-PLATFORM="macosx_14_0_arm64"  # See platform options below
+PLATFORM="macosx_10_9_universal2"  # See platform options below
 
 # Construct wheel name
 WHEEL="reachable-${WHEEL_VERSION}-${PYTHON}-${PYTHON}-${PLATFORM}.whl"
@@ -49,13 +49,24 @@ cosign verify-blob \
 
 ## Supported Platforms
 
-| Platform | Architecture | Platform Tag |
-|----------|--------------|--------------|
-| Linux | x86_64 | `manylinux_2_28_x86_64` |
-| Linux | ARM64 | `manylinux_2_28_aarch64` |
-| macOS | Apple Silicon | `macosx_14_0_arm64` |
+### Linux
 
-> **Note:** macOS Intel wheels are not currently available.
+| Architecture | Platform Tag |
+|--------------|--------------|
+| x86_64 (Intel/AMD) | `linux_x86_64` |
+| ARM64 | `linux_aarch64` |
+
+### macOS (Universal - Intel + Apple Silicon)
+
+All macOS wheels are `universal2` and work on **both** Intel and Apple Silicon Macs.
+
+| Python | Platform Tag | Min macOS |
+|--------|--------------|-----------|
+| 3.10 | `macosx_10_9_universal2` | 10.9 |
+| 3.11 | `macosx_10_9_universal2` | 10.9 |
+| 3.12 | `macosx_10_13_universal2` | 10.13 |
+| 3.13 | `macosx_10_13_universal2` | 10.13 |
+| 3.14 | `macosx_10_15_universal2` | 10.15 |
 
 ### Python Version Tags
 
@@ -93,12 +104,6 @@ curl -sSfL https://github.com/sigstore/cosign/releases/latest/download/cosign-li
 chmod +x /usr/local/bin/cosign
 ```
 
-### Windows (PowerShell)
-
-```powershell
-Invoke-WebRequest -Uri https://github.com/sigstore/cosign/releases/latest/download/cosign-windows-amd64.exe -OutFile cosign.exe
-```
-
 ---
 
 ## Understanding the Verification
@@ -124,20 +129,20 @@ openssl x509 -in reachable-*.whl.crt -text -noout | grep -A2 "Subject Alternativ
 Output:
 ```
 X509v3 Subject Alternative Name: critical
-    URI:https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v1.0.0-beta4
+    URI:https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v1.0.0-beta7
 ```
 
 This proves:
 - **Repo:** `sthenos-security/reach-core`
 - **Workflow:** `.github/workflows/release.yml`
-- **Tag:** `v1.0.0-beta4`
+- **Tag:** `v1.0.0-beta7`
 
 ### What the Signature Proves
 
 | Claim | Proof |
 |-------|-------|
 | Built by Sthenos Security | Certificate identity matches `sthenos-security/*` |
-| Built at specific version | Certificate contains `@refs/tags/v1.0.0-beta4` |
+| Built at specific version | Certificate contains `@refs/tags/v1.0.0-beta7` |
 | Not tampered | Signature validates against wheel SHA256 |
 | Publicly logged | Entry exists in Rekor transparency log |
 
@@ -145,15 +150,21 @@ This proves:
 
 ## Checksum Verification (Alternative)
 
-If you can't install cosign:
+If you can't install cosign, verify using SHA256 checksums:
 
 ```bash
-# Download checksums
-curl -LO https://github.com/sthenos-security/reach-dist/releases/download/v1.0.0-beta4/checksums.sha256
+# Navigate to wheels directory (or download checksums)
+cd wheels/v1.0.0-beta7
 
-# Verify
+# Verify checksum
 sha256sum -c checksums.sha256 --ignore-missing
-# Expected: reachable-1.0.0b4-cp311-cp311-macosx_14_0_arm64.whl: OK
+# Expected: reachable-1.0.0b7-cp311-cp311-macosx_10_9_universal2.whl: OK
+```
+
+Or download checksums directly:
+```bash
+curl -LO https://raw.githubusercontent.com/sthenos-security/reach-dist/main/wheels/v1.0.0-beta7/checksums.sha256
+sha256sum -c checksums.sha256 --ignore-missing
 ```
 
 **⚠️ Checksums verify integrity but NOT authenticity.** An attacker could replace both the wheel and checksums. Use cosign for full verification.
@@ -245,7 +256,7 @@ fi
 Usage:
 ```bash
 chmod +x verify-reachable.sh
-./verify-reachable.sh reachable-1.0.0b4-cp311-cp311-macosx_14_0_arm64.whl
+./verify-reachable.sh reachable-1.0.0b7-cp311-cp311-macosx_10_9_universal2.whl
 ```
 
 ---

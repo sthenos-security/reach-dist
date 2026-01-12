@@ -167,14 +167,28 @@ EOF
   echo "  Python:        $($PYTHON_BIN --version | awk '{print $2}') (${PY_TAG})"
   echo
 
-  # Prefer universal2 on macOS
+  # Determine platform tag based on OS, arch, and Python version
   if [[ "$OS" == "darwin" ]]; then
-    PLATFORM_TAG="macosx_10_15_universal2"
+    # macOS universal2 wheels - platform tag varies by Python version
+    # Python 3.10-3.11: macosx_10_9_universal2
+    # Python 3.12-3.13: macosx_10_13_universal2
+    # Python 3.14+:     macosx_10_15_universal2
+    PLATFORM_TAG="$($PYTHON_BIN - <<'EOF'
+import sys
+minor = sys.version_info.minor
+if minor <= 11:
+    print("macosx_10_9_universal2")
+elif minor <= 13:
+    print("macosx_10_13_universal2")
+else:
+    print("macosx_10_15_universal2")
+EOF
+)"
   elif [[ "$OS" == "linux" ]]; then
     if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-      PLATFORM_TAG="manylinux_2_28_aarch64"
+      PLATFORM_TAG="linux_aarch64"
     else
-      PLATFORM_TAG="manylinux_2_28_x86_64"
+      PLATFORM_TAG="linux_x86_64"
     fi
   else
     fail "Unsupported OS: $OS"

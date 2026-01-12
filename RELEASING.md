@@ -29,7 +29,42 @@ Internal documentation for the release process.
         │               └───────────────┘
         │
         └─► GitHub Releases (sthenos-security/reach-core)
-            └─► Copy to reach-dist releases
+            └─► Copy to reach-dist/wheels/
+```
+
+---
+
+## Wheel Directory Structure
+
+```
+reach-dist/
+├── install.sh                    → Automated installer
+├── wheels/
+│   ├── latest/                   → Symlink to most recent version
+│   └── v1.0.0-beta7/             → Version-specific directory
+│       ├── checksums.sha256
+│       │
+│       │   Linux x86_64
+│       ├── reachable-1.0.0b7-cp310-cp310-linux_x86_64.whl
+│       ├── reachable-1.0.0b7-cp311-cp311-linux_x86_64.whl
+│       ├── reachable-1.0.0b7-cp312-cp312-linux_x86_64.whl
+│       ├── reachable-1.0.0b7-cp313-cp313-linux_x86_64.whl
+│       ├── reachable-1.0.0b7-cp314-cp314-linux_x86_64.whl
+│       │
+│       │   Linux ARM64
+│       ├── reachable-1.0.0b7-cp310-cp310-linux_aarch64.whl
+│       ├── reachable-1.0.0b7-cp311-cp311-linux_aarch64.whl
+│       ├── reachable-1.0.0b7-cp312-cp312-linux_aarch64.whl
+│       ├── reachable-1.0.0b7-cp313-cp313-linux_aarch64.whl
+│       ├── reachable-1.0.0b7-cp314-cp314-linux_aarch64.whl
+│       │
+│       │   macOS Universal (Intel + Apple Silicon)
+│       ├── reachable-1.0.0b7-cp310-cp310-macosx_10_9_universal2.whl
+│       ├── reachable-1.0.0b7-cp311-cp311-macosx_10_9_universal2.whl
+│       ├── reachable-1.0.0b7-cp312-cp312-macosx_10_13_universal2.whl
+│       ├── reachable-1.0.0b7-cp313-cp313-macosx_10_13_universal2.whl
+│       └── reachable-1.0.0b7-cp314-cp314-macosx_10_15_universal2.whl
+└── README.md
 ```
 
 ---
@@ -42,17 +77,19 @@ Each release builds **15 wheels** (3 platforms × 5 Python versions):
 |----------|--------------|-------------|-------------|-------------|-------------|-------------|
 | Linux | x86_64 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Linux | ARM64 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| macOS | Apple Silicon | ✅ | ✅ | ✅ | ✅ | ✅ |
-
-> **Note:** macOS Intel wheels are not currently available (GitHub retired Intel Mac runners).
+| macOS | Universal (Intel + Apple Silicon) | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ### Platform Tags
 
 | Platform | Tag |
 |----------|-----|
-| Linux x86_64 | `manylinux_2_28_x86_64` |
-| Linux ARM64 | `manylinux_2_28_aarch64` |
-| macOS Apple Silicon | `macosx_14_0_arm64` |
+| Linux x86_64 | `linux_x86_64` |
+| Linux ARM64 | `linux_aarch64` |
+| macOS (Python 3.10-3.11) | `macosx_10_9_universal2` |
+| macOS (Python 3.12-3.13) | `macosx_10_13_universal2` |
+| macOS (Python 3.14) | `macosx_10_15_universal2` |
+
+> **Note:** All macOS wheels are `universal2`, supporting both Intel and Apple Silicon Macs.
 
 ### Python Tags
 
@@ -72,11 +109,11 @@ REACHABLE uses semantic versioning with beta releases:
 
 | Version | Wheel Version | Example Wheel |
 |---------|---------------|---------------|
-| `1.0.0-beta4` | `1.0.0b4` | `reachable-1.0.0b4-cp311-cp311-macosx_14_0_arm64.whl` |
-| `1.0.0-beta5` | `1.0.0b5` | `reachable-1.0.0b5-cp312-cp312-manylinux_2_28_x86_64.whl` |
-| `1.0.0` | `1.0.0` | `reachable-1.0.0-cp311-cp311-manylinux_2_28_aarch64.whl` |
+| `1.0.0-beta7` | `1.0.0b7` | `reachable-1.0.0b7-cp311-cp311-macosx_10_9_universal2.whl` |
+| `1.0.0-beta8` | `1.0.0b8` | `reachable-1.0.0b8-cp312-cp312-linux_x86_64.whl` |
+| `1.0.0` | `1.0.0` | `reachable-1.0.0-cp311-cp311-linux_aarch64.whl` |
 
-**Version file:** `VERSION` in reach-core root (e.g., `1.0.0b4`)
+**Version file:** `VERSION` in reach-core root (e.g., `1.0.0b7`)
 
 ---
 
@@ -88,14 +125,14 @@ REACHABLE uses semantic versioning with beta releases:
 cd ~/src/reach-core
 
 # Update version
-echo "1.0.0b5" > VERSION
+echo "1.0.0b8" > VERSION
 
 # Update CHANGELOG
 # ... edit docs/CHANGELOG.md ...
 
 # Commit
 git add VERSION docs/CHANGELOG.md
-git commit -m "v1.0.0-beta5"
+git commit -m "v1.0.0-beta8"
 git push origin main
 ```
 
@@ -103,8 +140,8 @@ git push origin main
 
 ```bash
 # Create and push tag
-git tag -a v1.0.0-beta5 -m "15 wheels"
-git push origin v1.0.0-beta5
+git tag -a v1.0.0-beta8 -m "15 wheels"
+git push origin v1.0.0-beta8
 ```
 
 This triggers `.github/workflows/release.yml` which:
@@ -119,92 +156,33 @@ Watch progress at: `https://github.com/sthenos-security/reach-core/actions`
 
 Build takes approximately 15-20 minutes for all platforms.
 
-### Step 4: Copy to reach-dist (Optional)
+### Step 4: Copy to reach-dist
 
-For public distribution via reach-dist:
+After CI/CD completes, copy wheels to reach-dist:
 
 ```bash
 cd ~/src/reach-dist
 
-# Update install.sh version
-sed -i '' 's/VERSION="1.0.0-beta4"/VERSION="1.0.0-beta5"/' install.sh
-sed -i '' 's/WHEEL_VERSION="1.0.0b4"/WHEEL_VERSION="1.0.0b5"/' install.sh
+# Create version directory
+mkdir -p wheels/v1.0.0-beta8
 
-# Commit
-git add install.sh
-git commit -m "Update to v1.0.0-beta5"
+# Download wheels from reach-core release (or copy from CI artifacts)
+# ... copy wheels to wheels/v1.0.0-beta8/ ...
+
+# Update latest symlink
+cd wheels
+rm -f latest
+ln -s v1.0.0-beta8 latest
+cd ..
+
+# Update install.sh version
+sed -i '' 's/VERSION="1.0.0-beta7"/VERSION="1.0.0-beta8"/' install.sh
+
+# Commit and push
+git add .
+git commit -m "Release v1.0.0-beta8"
 git push origin main
 ```
-
-Then create a matching release in reach-dist with the same wheel files.
-
----
-
-## CI/CD Workflow Details
-
-The release workflow (`.github/workflows/release.yml`) runs on tag push:
-
-```yaml
-on:
-  push:
-    tags: ['v*']
-```
-
-### Build Matrix
-
-```yaml
-matrix:
-  include:
-    # Linux x86_64
-    - { os: ubuntu-latest, python: "3.10", platform: manylinux_2_28_x86_64 }
-    - { os: ubuntu-latest, python: "3.11", platform: manylinux_2_28_x86_64 }
-    # ... (15 total combinations)
-    
-    # Linux ARM64 (QEMU emulation)
-    - { os: ubuntu-latest, python: "3.10", platform: manylinux_2_28_aarch64, emulate: true }
-    
-    # macOS Apple Silicon
-    - { os: macos-14, python: "3.10", platform: macosx_14_0_arm64 }
-```
-
-### Artifacts Generated
-
-| File | Description |
-|------|-------------|
-| `reachable-*.whl` | Python wheel (15 per release) |
-| `checksums.sha256` | SHA256 checksums for all wheels |
-| `sbom-*.json` | SBOM in SPDX format (optional) |
-
----
-
-## Manual Release (Fallback)
-
-If CI/CD fails, build locally:
-
-### Prerequisites
-
-```bash
-# Install build tools
-pip install build wheel
-
-# For Linux wheels (from macOS)
-# Use Docker with manylinux image
-```
-
-### Build Single Wheel
-
-```bash
-cd ~/src/reach-core
-python -m build --wheel
-# Output: dist/reachable-1.0.0b5-cp311-cp311-macosx_14_0_arm64.whl
-```
-
-### Upload to GitHub
-
-1. Go to: `https://github.com/sthenos-security/reach-core/releases`
-2. Edit the release (or create new)
-3. Upload wheel files
-4. Update checksums
 
 ---
 
@@ -213,8 +191,9 @@ python -m build --wheel
 ### Verification
 
 ```bash
-# Download and test
-pip install https://github.com/sthenos-security/reach-dist/releases/download/v1.0.0-beta5/reachable-1.0.0b5-cp311-cp311-macosx_14_0_arm64.whl
+# Clean install test
+rm -rf ~/.reachable
+./install.sh
 
 # Verify installation
 reachctl version
@@ -223,9 +202,11 @@ reachctl selftest
 
 ### Update reach-dist
 
-- [ ] Update `install.sh` version
+- [ ] Copy wheels to `wheels/vX.Y.Z-betaN/`
+- [ ] Update `wheels/latest` symlink
+- [ ] Update `install.sh` VERSION
 - [ ] Update `README.md` if needed
-- [ ] Create matching release (or sync from reach-core)
+- [ ] Commit and push
 
 ### Communication
 
@@ -248,12 +229,12 @@ reachctl selftest
 
 ```bash
 # Delete local and remote tag
-git tag -d v1.0.0-beta5
-git push origin --delete v1.0.0-beta5
+git tag -d v1.0.0-beta7
+git push origin --delete v1.0.0-beta7
 
 # Re-create
-git tag -a v1.0.0-beta5 -m "15 wheels"
-git push origin v1.0.0-beta5
+git tag -a v1.0.0-beta7 -m "15 wheels"
+git push origin v1.0.0-beta7
 ```
 
 > **Note:** If repository rules prevent tag deletion, increment to next beta version.
@@ -264,7 +245,7 @@ Check `VERSION` file matches expected version before tagging:
 
 ```bash
 cat VERSION
-# Should show: 1.0.0b5
+# Should show: 1.0.0b7
 ```
 
 ---

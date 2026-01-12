@@ -10,10 +10,17 @@ All notable changes to REACHABLE are documented here.
 - **Call Graph Visualization** in dashboard - click "Yes (call graph)" to see reachability path
 - Transitive dependency chains shown: `app_func → direct_import → vulnerable_package`
 - `call_path` and `reachability_path` fields populated for CVEs, CWEs, and Secrets
+- **macOS Universal2 wheels** - single wheel supports both Intel and Apple Silicon Macs
 
 ### Changed
 - Dashboard "Reachable" column now shows "Yes (call graph)" when path data available
 - Improved reachability path display with color-coded steps (green=entry, gray=middle, red=vulnerable)
+- macOS wheels now use `universal2` platform tag (supports Intel + Apple Silicon)
+- Installation path is now `~/.reachable/venv/bin` (virtual environment based)
+
+### Fixed
+- Installer script now correctly handles all Python versions and platforms
+- PATH documentation corrected to use `~/.reachable/venv/bin`
 
 ### Note
 - GuardDog/Static Malware findings do not have call paths (file-based detection)
@@ -34,10 +41,6 @@ All notable changes to REACHABLE are documented here.
 - `requires-python` updated to `>=3.10`
 - Wheel naming convention with explicit `cpXYZ` tags
 - Release process now fully automated via CI/CD
-
-### Removed
-- macOS Intel (x86_64) wheels (GitHub retired Intel Mac runners)
-- Intel Mac users can install from source
 
 ---
 
@@ -82,27 +85,29 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
-## Wheel Matrix
+## Wheel Matrix (v1.0.0-beta7)
 
 Each release includes **15 wheels**:
 
-| Platform | Architecture | Python Versions |
-|----------|--------------|-----------------|
-| Linux | x86_64 | 3.10, 3.11, 3.12, 3.13, 3.14 |
-| Linux | ARM64 | 3.10, 3.11, 3.12, 3.13, 3.14 |
-| macOS | Apple Silicon | 3.10, 3.11, 3.12, 3.13, 3.14 |
+### Linux
 
-> **Note:** macOS Intel wheels not available. Contact support if needed.
+| Python | x86_64 | ARM64 |
+|--------|--------|-------|
+| 3.10 | `linux_x86_64` | `linux_aarch64` |
+| 3.11 | `linux_x86_64` | `linux_aarch64` |
+| 3.12 | `linux_x86_64` | `linux_aarch64` |
+| 3.13 | `linux_x86_64` | `linux_aarch64` |
+| 3.14 | `linux_x86_64` | `linux_aarch64` |
 
----
+### macOS (Universal - Intel + Apple Silicon)
 
-## Platform Tags Reference
-
-| Tag | Platform |
-|-----|----------|
-| `manylinux_2_28_x86_64` | Linux x86_64 |
-| `manylinux_2_28_aarch64` | Linux ARM64 |
-| `macosx_14_0_arm64` | macOS Apple Silicon |
+| Python | Platform Tag | Min macOS |
+|--------|--------------|-----------|
+| 3.10 | `macosx_10_9_universal2` | 10.9 |
+| 3.11 | `macosx_10_9_universal2` | 10.9 |
+| 3.12 | `macosx_10_13_universal2` | 10.13 |
+| 3.13 | `macosx_10_13_universal2` | 10.13 |
+| 3.14 | `macosx_10_15_universal2` | 10.15 |
 
 ---
 

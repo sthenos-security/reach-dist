@@ -6,18 +6,46 @@ Official distribution repository for REACHABLE wheel packages.
 
 ## Quick Install
 
-1. Download `install.sh` from this repository (Releases or Code tab)
-2. Run it:
+### Option 1: Automated Install (Recommended)
 
 ```bash
-bash install.sh
+# Download installer
+curl -LO https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh
+
+# Make executable (just in case)
+chmod +x install.sh
+
+# Run installer
+./install.sh
 ```
 
-3. Enter your GitHub Personal Access Token when prompted
-   - Create one at: https://github.com/settings/tokens (with `repo` scope)
-   - Or set `export GITHUB_TOKEN=ghp_xxx` before running
+The installer will:
+1. Prompt for your GitHub Personal Access Token
+2. Auto-detect your OS, architecture, and Python version
+3. Download and install the correct wheel
+4. Create an isolated virtual environment at `~/.reachable/venv`
 
-The installer auto-detects your OS, architecture, and Python version, then downloads the correct wheel.
+**GitHub Token Setup:**
+- Go to https://github.com/settings/tokens
+- Create a **Classic** token with `repo` scope enabled
+- Or set `export GITHUB_TOKEN=ghp_xxx` before running
+
+### Option 2: Manual Wheel Install
+
+If you prefer to download the wheel manually:
+
+```bash
+# Download install.sh and your wheel
+curl -LO https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh
+chmod +x install.sh
+
+# Install from local wheel (no GitHub token needed)
+./install.sh path/to/reachable-1.0.0b7-cpXYZ-cpXYZ-PLATFORM.whl
+```
+
+Wheels are available in:
+- `wheels/latest/` — Latest release
+- `wheels/v1.0.0-beta7/` — Specific version
 
 ---
 
@@ -25,100 +53,30 @@ The installer auto-detects your OS, architecture, and Python version, then downl
 
 - **Python:** 3.10, 3.11, 3.12, 3.13, or 3.14
 - **OS:** Linux or macOS
-- **Architecture:** x86_64 (Linux only) or ARM64
-
-> **Note:** macOS Intel is not currently supported. Contact adazzi@sthenosec.com if needed.
-
----
-
-## Manual Installation
-
-If you prefer to install manually:
-
-### 1. Check your Python version
-
-```bash
-python3 --version
-```
-
-### 2. Download the matching wheel
-
-Find your wheel in the [Releases](https://github.com/sthenos-security/reach-dist/releases) page based on your Python version and platform.
-
-### 3. Install
-
-```bash
-pip install reachable-<version>-<python>-<python>-<platform>.whl
-```
-
-### 4. Verify
-
-```bash
-reachctl version
-reachctl selftest
-```
-
----
-
-## Wheel Naming Convention
-
-```
-reachable-VERSION-cpXYZ-cpXYZ-PLATFORM.whl
-         │        │           │
-         │        │           └── Platform tag
-         │        └────────────── Python version tag (appears twice)
-         └─────────────────────── Package version
-```
-
-### Python Version Tags
-
-| Tag | Python Version |
-|-----|----------------|
-| `cp310` | Python 3.10 |
-| `cp311` | Python 3.11 |
-| `cp312` | Python 3.12 |
-| `cp313` | Python 3.13 |
-| `cp314` | Python 3.14 |
-
-### Platform Tags
-
-| Tag | Platform | Architecture |
-|-----|----------|--------------|
-| `manylinux_2_28_x86_64` | Linux | x86_64 (Intel/AMD) |
-| `manylinux_2_28_aarch64` | Linux | ARM64 |
-| `macosx_14_0_arm64` | macOS | Apple Silicon (M1/M2/M3/M4) |
-
-> **Note:** macOS Intel wheels are not currently available. Intel Mac users can install from source.
-
----
-
-## Wheel Matrix
-
-Each release includes **15 wheels** (5 Python versions × 3 platforms):
-
-| Platform | Architecture | cp310 | cp311 | cp312 | cp313 | cp314 |
-|----------|--------------|-------|-------|-------|-------|-------|
-| Linux | x86_64 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Linux | ARM64 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| macOS | Apple Silicon | ✅ | ✅ | ✅ | ✅ | ✅ |
-| macOS | Intel | ❌ | ❌ | ❌ | ❌ | ❌ |
-
-### Examples
-
-| System | Python | Wheel |
-|--------|--------|-------|
-| Ubuntu 22.04, Intel | 3.11 | `reachable-*-cp311-cp311-manylinux_2_28_x86_64.whl` |
-| Ubuntu 24.04, ARM (AWS Graviton) | 3.12 | `reachable-*-cp312-cp312-manylinux_2_28_aarch64.whl` |
-| macOS Sonoma, M3 | 3.13 | `reachable-*-cp313-cp313-macosx_14_0_arm64.whl` |
+- **Architecture:** x86_64 or ARM64 (macOS wheels are universal - work on both)
 
 ---
 
 ## Post-Installation
 
-### Quick Start Guide
+### Add to PATH
+
+After installation, add the REACHABLE bin directory to your PATH:
 
 ```bash
-reachctl primer
+# Add to ~/.bashrc or ~/.zshrc
+export PATH="$HOME/.reachable/venv/bin:$PATH"
+
+# Reload shell
+source ~/.zshrc  # or ~/.bashrc
+```
+
+### Verify Installation
+
+```bash
+reachctl version
+reachctl selftest
+reachctl primer    # Quick-start guide
 ```
 
 ### Check Dependencies
@@ -127,25 +85,55 @@ reachctl primer
 reachctl doctor
 ```
 
-### Scan a Repository
+---
 
-```bash
-reachctl scan /path/to/your/repo
-```
+## Wheel Matrix (v1.0.0-beta7)
 
-### View Dashboard
+Each release includes **15 wheels** (5 Python versions × 3 platforms):
 
-```bash
-reachctl dashboard
-```
+### Linux
+
+| Python | x86_64 | ARM64 |
+|--------|--------|-------|
+| 3.10 | `reachable-1.0.0b7-cp310-cp310-linux_x86_64.whl` | `reachable-1.0.0b7-cp310-cp310-linux_aarch64.whl` |
+| 3.11 | `reachable-1.0.0b7-cp311-cp311-linux_x86_64.whl` | `reachable-1.0.0b7-cp311-cp311-linux_aarch64.whl` |
+| 3.12 | `reachable-1.0.0b7-cp312-cp312-linux_x86_64.whl` | `reachable-1.0.0b7-cp312-cp312-linux_aarch64.whl` |
+| 3.13 | `reachable-1.0.0b7-cp313-cp313-linux_x86_64.whl` | `reachable-1.0.0b7-cp313-cp313-linux_aarch64.whl` |
+| 3.14 | `reachable-1.0.0b7-cp314-cp314-linux_x86_64.whl` | `reachable-1.0.0b7-cp314-cp314-linux_aarch64.whl` |
+
+### macOS (Universal - Intel + Apple Silicon)
+
+| Python | Wheel | Min macOS |
+|--------|-------|-----------|
+| 3.10 | `reachable-1.0.0b7-cp310-cp310-macosx_10_9_universal2.whl` | 10.9 |
+| 3.11 | `reachable-1.0.0b7-cp311-cp311-macosx_10_9_universal2.whl` | 10.9 |
+| 3.12 | `reachable-1.0.0b7-cp312-cp312-macosx_10_13_universal2.whl` | 10.13 |
+| 3.13 | `reachable-1.0.0b7-cp313-cp313-macosx_10_13_universal2.whl` | 10.13 |
+| 3.14 | `reachable-1.0.0b7-cp314-cp314-macosx_10_15_universal2.whl` | 10.15 |
+
+> **Note:** All macOS wheels are `universal2` and work on **both** Intel and Apple Silicon Macs.
 
 ---
 
 ## Uninstall
 
 ```bash
-pip uninstall reachable
-rm -rf ~/.reachable  # Optional: remove data
+# Remove the virtual environment and all data
+rm -rf ~/.reachable
+```
+
+---
+
+## Reinstall / Upgrade
+
+To reinstall or upgrade to a new version:
+
+```bash
+# Remove existing installation
+rm -rf ~/.reachable
+
+# Run installer again
+./install.sh
 ```
 
 ---
@@ -154,33 +142,38 @@ rm -rf ~/.reachable  # Optional: remove data
 
 ### "Command not found: reachctl"
 
-Add REACHABLE's bin directory to your PATH:
+Add REACHABLE's venv bin directory to your PATH:
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
-export PATH="$HOME/.reachable/bin:$PATH"
+export PATH="$HOME/.reachable/venv/bin:$PATH"
+
+# Reload
+source ~/.zshrc
 ```
 
 ### "No matching distribution found"
 
-Ensure you're downloading the correct wheel for your Python version and platform:
+Ensure you're downloading the correct wheel for your Python version:
 
 ```bash
 # Check Python version
 python3 -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')"
-
-# Check platform
-python3 -c "import platform; print(platform.machine())"
 ```
 
 ### Permission Errors
 
-The installer creates its own isolated environment at `~/.reachable/venv`. If you encounter permission issues, try:
-
 ```bash
 rm -rf ~/.reachable
-bash install.sh
+./install.sh
 ```
+
+### Token Issues
+
+If the installer fails with token errors:
+1. Ensure you're using a **Classic** PAT (not fine-grained)
+2. Verify the `repo` scope is enabled
+3. Check if SSO authorization is required for your organization
 
 ---
 
