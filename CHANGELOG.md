@@ -4,6 +4,23 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
+## [1.0.0-beta7] - 2026-01-12
+
+### Added
+- **Call Graph Visualization** in dashboard - click "Yes (call graph)" to see reachability path
+- Transitive dependency chains shown: `app_func → direct_import → vulnerable_package`
+- `call_path` and `reachability_path` fields populated for CVEs, CWEs, and Secrets
+
+### Changed
+- Dashboard "Reachable" column now shows "Yes (call graph)" when path data available
+- Improved reachability path display with color-coded steps (green=entry, gray=middle, red=vulnerable)
+
+### Note
+- GuardDog/Static Malware findings do not have call paths (file-based detection)
+- Full lib→lib→lib transitive chains planned for future release
+
+---
+
 ## [1.0.0-beta4] - 2026-01-11
 
 ### Added
