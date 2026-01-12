@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+# Copyright © 2026 Sthenos Security. All rights reserved.
+
 set -euo pipefail
 
 ###############################################################################
@@ -9,6 +12,7 @@ VERSION="1.0.0-beta7"
 PACKAGE_NAME="reachable"
 REPO_OWNER="sthenos-security"
 REPO_NAME="reach-dist"
+REPO_REF="main"  # branch/tag/sha to download from
 
 LOCAL_WHEEL="${1:-}"
 
@@ -85,11 +89,22 @@ require_github_token() {
   if [[ -z "${GITHUB_TOKEN:-}" ]]; then
     cat <<EOF
 
-  A GitHub Personal Access Token is required.
-  Use your own GitHub account token (with 'repo' scope).
+  A GitHub Personal Access Token is required to download from a private repo.
 
-  Create one at: https://github.com/settings/tokens
-  Or set: export GITHUB_TOKEN=ghp_xxxx
+  Classic PAT:
+    • scope: repo
+
+  Fine-grained PAT (recommended minimum):
+    • Repository access: ${REPO_OWNER}/${REPO_NAME}
+    • Contents: Read-only
+    • Metadata: Read-only (required)
+
+  Create token:
+    • Fine-grained: https://github.com/settings/personal-access-tokens/new
+    • Classic:      https://github.com/settings/tokens
+
+  Or set:
+    export GITHUB_TOKEN=ghp_xxxx
 
 EOF
     read -s -p "  Enter GitHub Token: " GITHUB_TOKEN
@@ -97,10 +112,33 @@ EOF
     export GITHUB_TOKEN
   fi
 
-  curl -sSf \
+  # Validate token early
+  # Use classic-compatible header format ("token ..."). Fine-grained tokens also work with this.
+  local tmp_body tmp_hdr http_code
+  tmp_body="$(mktemp)"
+  tmp_hdr="$(mktemp)"
+  trap 'rm -f "$tmp_body" "$tmp_hdr"' RETURN
+
+  http_code="$(curl -sS -L \
+    -D "$tmp_hdr" \
+    -o "$tmp_body" \
+    -w "%{http_code}" \
     -H "Authorization: token ${GITHUB_TOKEN}" \
-    https://api.github.com/user >/dev/null \
-    || fail "Invalid GitHub token or insufficient permissions"
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/user" || true)"
+
+  if [[ "$http_code" != "200" ]]; then
+    echo
+    echo "✗ Token validation failed (HTTP $http_code)"
+    echo
+    echo "  Response headers (selected):"
+    grep -iE 'x-github|x-ratelimit|content-type|status' "$tmp_hdr" || true
+    echo
+    echo "  Response body (first 300 chars):"
+    head -c 300 "$tmp_body" || true
+    echo
+    fail "Invalid GitHub token or insufficient permissions"
+  fi
 }
 
 ###############################################################################
@@ -116,7 +154,7 @@ detect_environment() {
   ARCH="$(uname -m)"
 
   PYTHON_BIN="${PYTHON:-python3}"
-  PY_TAG="$($PYTHON_BIN - <<EOF
+  PY_TAG="$($PYTHON_BIN - <<'EOF'
 import sys
 print(f"cp{sys.version_info.major}{sys.version_info.minor}")
 EOF
@@ -129,6 +167,7 @@ EOF
   echo "  Python:        $($PYTHON_BIN --version | awk '{print $2}') (${PY_TAG})"
   echo
 
+  # Prefer universal2 on macOS
   if [[ "$OS" == "darwin" ]]; then
     PLATFORM_TAG="macosx_10_15_universal2"
   elif [[ "$OS" == "linux" ]]; then
@@ -141,47 +180,117 @@ EOF
     fail "Unsupported OS: $OS"
   fi
 
-  WHEEL_NAME="${PACKAGE_NAME}-${VERSION/beta/b}-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
+  # Convert VERSION like "1.0.0-beta7" -> "1.0.0b7" (PEP 440)
+  WHEEL_VERSION="$(python3 - <<PY
+import re
+v="${VERSION}"
+m=re.match(r"^(\d+\.\d+\.\d+)-beta(\d+)$", v)
+print(f"{m.group(1)}b{m.group(2)}" if m else v)
+PY
+)"
+
+  WHEEL_NAME="${PACKAGE_NAME}-${WHEEL_VERSION}-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
+  WHEEL_DIR="wheels/v${VERSION}"
 
   echo "  Package Information"
   echo "  ─────────────────────────────────────────────────────────────"
   echo "  Version:       ${VERSION}"
   echo "  Wheel:         ${WHEEL_NAME}"
+  echo "  Directory:     ${WHEEL_DIR} (ref: ${REPO_REF})"
   echo
 }
 
 ###############################################################################
-# Download wheel from GitHub
+# Download wheel from GitHub repo directory (Contents API)
 ###############################################################################
 
 download_wheel() {
   echo "▶ Downloading wheel"
-  echo "  Repository: ${REPO_OWNER}/${REPO_NAME}"
+  echo "  Source: ${REPO_OWNER}/${REPO_NAME}/${WHEEL_DIR} (ref: ${REPO_REF})"
 
-  RELEASE_JSON="$(curl -sSf \
+  local api_base dir_url tmp_body tmp_hdr http_code
+  api_base="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents"
+  dir_url="${api_base}/${WHEEL_DIR}?ref=${REPO_REF}"
+
+  tmp_body="$(mktemp)"
+  tmp_hdr="$(mktemp)"
+  trap 'rm -f "$tmp_body" "$tmp_hdr"' RETURN
+
+  # Fetch directory listing into a file (avoid JSONDecodeError due to empty/non-JSON stdin)
+  http_code="$(curl -sS -L \
+    -D "$tmp_hdr" \
+    -o "$tmp_body" \
+    -w "%{http_code}" \
     -H "Authorization: token ${GITHUB_TOKEN}" \
-    https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/tags/v${VERSION})" \
-    || fail "Release v${VERSION} not found"
+    -H "Accept: application/vnd.github+json" \
+    "$dir_url" || true)"
 
-  ASSET_ID="$(echo "$RELEASE_JSON" | python3 - <<EOF
+  if [[ "$http_code" != "200" ]]; then
+    echo
+    echo "✗ GitHub API returned HTTP $http_code for directory listing"
+    echo "  URL: $dir_url"
+    echo
+    echo "  Response headers (selected):"
+    grep -iE 'x-github|x-ratelimit|content-type|status' "$tmp_hdr" || true
+    echo
+    echo "  Response body (first 400 chars):"
+    head -c 400 "$tmp_body" || true
+    echo
+    fail "Cannot access ${WHEEL_DIR}. Check token access, SSO, and ref/path."
+  fi
+
+  # Validate listing is a JSON array and check for target wheel
+  local found
+  found="$(python3 - <<PY "$tmp_body"
 import json, sys
-data = json.load(sys.stdin)
-for a in data.get("assets", []):
-    if a["name"] == "${WHEEL_NAME}":
-        print(a["id"])
-        sys.exit(0)
-sys.exit(1)
-EOF
+p=sys.argv[1]
+with open(p, "r", encoding="utf-8", errors="replace") as f:
+    data=json.load(f)
+want="${WHEEL_NAME}"
+ok=any(i.get("type")=="file" and i.get("name")==want for i in data) if isinstance(data, list) else False
+print("yes" if ok else "no")
+PY
 )"
 
-  [[ -n "$ASSET_ID" ]] || fail "Compatible wheel not found"
+  if [[ "$found" != "yes" ]]; then
+    echo
+    echo "✗ Compatible wheel not found in ${WHEEL_DIR}: ${WHEEL_NAME}"
+    echo
+    echo "  Available wheels:"
+    python3 - <<'PY' "$tmp_body"
+import json, sys
+data=json.load(open(sys.argv[1], "r", encoding="utf-8", errors="replace"))
+names=[i.get("name","") for i in data if i.get("type")=="file" and i.get("name","").endswith(".whl")]
+for n in sorted(names):
+    print(f"    • {n}")
+PY
+    echo
+    fail "Build/publish mismatch: installer expects ${WHEEL_NAME} but it is not present."
+  fi
 
-  curl -L \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
-    -H "Accept: application/octet-stream" \
-    "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/assets/${ASSET_ID}" \
+  # Download the file contents as raw bytes
+  local file_path file_url
+  file_path="${WHEEL_DIR}/${WHEEL_NAME}"
+  file_url="${api_base}/${file_path}?ref=${REPO_REF}"
+
+  http_code="$(curl -sS -L \
+    -D "$tmp_hdr" \
     -o "${WHEEL_NAME}" \
-    || fail "Download failed"
+    -w "%{http_code}" \
+    -H "Authorization: token ${GITHUB_TOKEN}" \
+    -H "Accept: application/vnd.github.raw" \
+    "$file_url" || true)"
+
+  if [[ "$http_code" != "200" ]]; then
+    echo
+    echo "✗ Download failed (HTTP $http_code)"
+    echo "  URL: $file_url"
+    echo
+    echo "  Response headers (selected):"
+    grep -iE 'x-github|x-ratelimit|content-type|status' "$tmp_hdr" || true
+    echo
+    fail "Download failed (Contents API raw). Check PAT permissions / SSO."
+  fi
 
   echo "  ✓ Downloaded ${WHEEL_NAME}"
   echo
@@ -219,3 +328,4 @@ install_downloaded_wheel
 
 echo
 echo "✔ Installation complete"
+
