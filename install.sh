@@ -8,7 +8,7 @@ set -euo pipefail
 # REACHABLE Private Distribution Installer
 ###############################################################################
 
-VERSION="1.0.0-beta7"
+VERSION="latest"
 PACKAGE_NAME="reachable"
 REPO_OWNER="sthenos-security"
 REPO_NAME="reach-dist"
