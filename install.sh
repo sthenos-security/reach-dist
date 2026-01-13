@@ -8,7 +8,7 @@ set -euo pipefail
 # REACHABLE Private Distribution Installer
 ###############################################################################
 
-VERSION="latest"
+VERSION="1.0.0-beta8"
 PACKAGE_NAME="reachable"
 REPO_OWNER="sthenos-security"
 REPO_NAME="reach-dist"
@@ -237,28 +237,16 @@ EOF
   fi
 
   # Convert VERSION like "1.0.0-beta7" -> "1.0.0b7" (PEP 440)
-  # For "latest", we'll discover the actual version from the wheel files
-  if [[ "$VERSION" == "latest" ]]; then
-    WHEEL_VERSION="latest"  # Will be resolved after directory listing
-    WHEEL_NAME_PATTERN="${PACKAGE_NAME}-*-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
-  else
-    WHEEL_VERSION="$(python3 - <<PY
+  WHEEL_VERSION="$(python3 - <<PY
 import re
 v="${VERSION}"
 m=re.match(r"^(\d+\.\d+\.\d+)-beta(\d+)$", v)
 print(f"{m.group(1)}b{m.group(2)}" if m else v)
 PY
 )"
-    WHEEL_NAME_PATTERN="${PACKAGE_NAME}-${WHEEL_VERSION}-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
-  fi
 
-  WHEEL_NAME="$WHEEL_NAME_PATTERN"  # May be updated for latest
-  # Set wheel directory - "latest" is a special case without v prefix
-  if [[ "$VERSION" == "latest" ]]; then
-    WHEEL_DIR="wheels/latest"
-  else
-    WHEEL_DIR="wheels/v${VERSION}"
-  fi
+  WHEEL_NAME="${PACKAGE_NAME}-${WHEEL_VERSION}-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
+  WHEEL_DIR="wheels/v${VERSION}"
 
   echo "  Package Information"
   echo "  ─────────────────────────────────────────────────────────────"
@@ -308,30 +296,8 @@ download_wheel() {
   fi
 
   # Validate listing is a JSON array and check for target wheel
-  local found actual_wheel
-  if [[ "$VERSION" == "latest" ]]; then
-    # For latest, find wheel matching platform pattern
-    actual_wheel="$(python3 - <<PY "$tmp_body"
-import json, sys, fnmatch
-p=sys.argv[1]
-with open(p, "r", encoding="utf-8", errors="replace") as f:
-    data=json.load(f)
-pattern="${WHEEL_NAME_PATTERN}"
-if isinstance(data, list):
-    for i in data:
-        if i.get("type")=="file" and fnmatch.fnmatch(i.get("name",""), pattern):
-            print(i.get("name"))
-            break
-PY
-)"
-    if [[ -n "$actual_wheel" ]]; then
-      found="yes"
-      WHEEL_NAME="$actual_wheel"
-    else
-      found="no"
-    fi
-  else
-    found="$(python3 - <<PY "$tmp_body"
+  local found
+  found="$(python3 - <<PY "$tmp_body"
 import json, sys
 p=sys.argv[1]
 with open(p, "r", encoding="utf-8", errors="replace") as f:
@@ -341,7 +307,6 @@ ok=any(i.get("type")=="file" and i.get("name")==want for i in data) if isinstanc
 print("yes" if ok else "no")
 PY
 )"
-  fi
 
   if [[ "$found" != "yes" ]]; then
     echo
