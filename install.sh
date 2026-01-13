@@ -246,7 +246,12 @@ PY
 )"
 
   WHEEL_NAME="${PACKAGE_NAME}-${WHEEL_VERSION}-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
-  WHEEL_DIR="wheels/v${VERSION}"
+  # Set wheel directory - "latest" is a special case without v prefix
+  if [[ "$VERSION" == "latest" ]]; then
+    WHEEL_DIR="wheels/latest"
+  else
+    WHEEL_DIR="wheels/v${VERSION}"
+  fi
 
   echo "  Package Information"
   echo "  ─────────────────────────────────────────────────────────────"
