@@ -115,6 +115,48 @@ Each release includes **15 wheels** (5 Python versions × 3 platforms):
 
 ---
 
+## GitHub Authentication for Scanning
+
+After installation, REACHABLE needs GitHub access to clone vulnerable library source code for reachability analysis. This requires **read permissions on all repositories** (public and private).
+
+### Option 1: SSH Key (Recommended for Developers)
+
+```bash
+# Check if SSH is configured
+ssh -T git@github.com
+
+# If not, generate a key and add to GitHub
+ssh-keygen -t ed25519
+# Add ~/.ssh/id_ed25519.pub to https://github.com/settings/keys
+```
+
+### Option 2: GitHub Token (Recommended for CI/CD)
+
+```bash
+export GITHUB_TOKEN='ghp_your_token_here'
+```
+
+**Required scope:** `repo` (grants read access to public AND private repositories)
+
+### Option 3: MCP GitHub Token (Claude Desktop Integration)
+
+```bash
+export MCP_GITHUB_TOKEN='ghp_your_token_here'
+```
+
+**Same scope requirements** - needs `repo` scope for full read access.
+
+Used for MCP-based cloning. Falls back to regular git if unavailable.
+
+### Token Priority
+
+1. `MCP_GITHUB_TOKEN`
+2. `GITHUB_TOKEN`
+3. `GH_TOKEN`
+4. SSH key
+
+---
+
 ## Uninstall
 
 ```bash
@@ -126,13 +168,20 @@ rm -rf ~/.reachable
 
 ## Reinstall / Upgrade
 
-To reinstall or upgrade to a new version:
+The installer uses `--force-reinstall`, so you can simply re-run it:
 
 ```bash
-# Remove existing installation
+# Re-run installer (automatically replaces existing installation)
+./install.sh
+```
+
+For a completely clean reinstall:
+
+```bash
+# Remove existing installation first
 rm -rf ~/.reachable
 
-# Run installer again
+# Run installer
 ./install.sh
 ```
 

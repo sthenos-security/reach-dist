@@ -62,6 +62,49 @@ setup_venv() {
 }
 
 ###############################################################################
+# Post-install instructions
+###############################################################################
+
+print_next_steps() {
+  echo
+  echo "============================================================"
+  echo "✔ REACHABLE installed successfully!"
+  echo "============================================================"
+  echo
+  echo "NEXT STEPS:"
+  echo
+  echo "1. ADD TO PATH (add to ~/.zshrc or ~/.bashrc):"
+  echo
+  echo '   export PATH="$HOME/.reachable/venv/bin:$PATH"'
+  echo
+  echo "   Then reload your shell:"
+  echo "     source ~/.zshrc"
+  echo
+  echo "2. SET GITHUB TOKEN (for cloning vulnerable libraries):"
+  echo
+  echo "   export GITHUB_TOKEN='ghp_your_token_here'"
+  echo
+  echo "   Token requires 'repo' scope for read access to all repositories."
+  echo "   Create at: https://github.com/settings/tokens"
+  echo
+  echo "   For Claude Desktop MCP integration, also set:"
+  echo "   export MCP_GITHUB_TOKEN='ghp_your_token_here'"
+  echo
+  echo "3. RUN YOUR FIRST SCAN:"
+  echo
+  echo "   reachctl scan /path/to/your/repo"
+  echo
+  echo "   First scan takes ~1-2 min extra to download vulnerability databases."
+  echo
+  echo "OTHER COMMANDS:"
+  echo "   reachctl doctor     # Check tool dependencies"
+  echo "   reachctl primer     # Quick-start guide"
+  echo "   reachctl version    # Show version info"
+  echo
+  echo "============================================================"
+}
+
+###############################################################################
 # Local wheel install (NO GitHub, NO token)
 ###############################################################################
 
@@ -74,10 +117,9 @@ install_local_wheel() {
   echo
 
   setup_venv
-  python -m pip install "$LOCAL_WHEEL" || fail "pip install failed"
+  python -m pip install --force-reinstall "$LOCAL_WHEEL" || fail "pip install failed"
 
-  echo
-  echo "✔ REACHABLE installed from local wheel"
+  print_next_steps
   exit 0
 }
 
@@ -316,7 +358,7 @@ PY
 
 install_downloaded_wheel() {
   setup_venv
-  python -m pip install "./${WHEEL_NAME}" || fail "pip install failed"
+  python -m pip install --force-reinstall "./${WHEEL_NAME}" || fail "pip install failed"
 }
 
 ###############################################################################
@@ -339,7 +381,5 @@ print_installer
 detect_environment
 download_wheel
 install_downloaded_wheel
-
-echo
-echo "✔ Installation complete"
+print_next_steps
 
