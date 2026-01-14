@@ -1,385 +1,443 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# =============================================================================
+#
+#  ██████╗ ███████╗ █████╗  ██████╗██╗  ██╗ █████╗ ██████╗ ██╗     ███████╗
+#  ██╔══██╗██╔════╝██╔══██╗██╔════╝██║  ██║██╔══██╗██╔══██╗██║     ██╔════╝
+#  ██████╔╝█████╗  ███████║██║     ███████║███████║██████╔╝██║     █████╗  
+#  ██╔══██╗██╔══╝  ██╔══██║██║     ██╔══██║██╔══██║██╔══██╗██║     ██╔══╝  
+#  ██║  ██║███████╗██║  ██║╚██████╗██║  ██║██║  ██║██████╔╝███████╗███████╗
+#  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚══════╝
+#
+#  Installer (GitHub CLI Edition)
+#  Copyright © 2026 Sthenos Security. All rights reserved.
+#
+#  Usage:
+#    # Fresh install
+#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+#
+#    # Upgrade existing installation
+#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
+#
+#    # Clean install (removes existing data)
+#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --clean
+#
+#    # Specific version
+#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --version 1.0.0-beta9
+#
+# =============================================================================
 
-# Copyright © 2026 Sthenos Security. All rights reserved.
+set -e
 
-set -euo pipefail
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
+VERSION="1.0.0-beta9"
+WHEEL_VERSION="1.0.0b9"
+REPO="sthenos-security/reach-dist"
 
-###############################################################################
-# REACHABLE Private Distribution Installer
-###############################################################################
+# -----------------------------------------------------------------------------
+# Parse Arguments
+# -----------------------------------------------------------------------------
+UPDATE_MODE=false
+CUSTOM_VERSION=""
+CLEAN_DATA=false
 
-VERSION="1.0.0-beta8"
-PACKAGE_NAME="reachable"
-REPO_OWNER="sthenos-security"
-REPO_NAME="reach-dist"
-REPO_REF="main"  # branch/tag/sha to download from
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --update|-u)
+            UPDATE_MODE=true
+            shift
+            ;;
+        --version|-v)
+            CUSTOM_VERSION="$2"
+            shift 2
+            ;;
+        --clean)
+            CLEAN_DATA=true
+            shift
+            ;;
+        --help|-h)
+            echo "REACHABLE Installer"
+            echo ""
+            echo "Usage:"
+            echo "  curl -sSL .../install.sh | bash [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --update, -u       Upgrade existing installation (backs up data)"
+            echo "  --version, -v VER  Install specific version (e.g., 1.0.0-beta9)"
+            echo "  --clean            Remove existing data before install (recommended for beta upgrades)"
+            echo "  --help, -h         Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  # Fresh install"
+            echo "  curl -sSL .../install.sh | bash"
+            echo ""
+            echo "  # Upgrade with backup"
+            echo "  curl -sSL .../install.sh | bash -s -- --update"
+            echo ""
+            echo "  # Clean install (beta recommended)"
+            echo "  curl -sSL .../install.sh | bash -s -- --clean"
+            echo ""
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage"
+            exit 1
+            ;;
+    esac
+done
 
-LOCAL_WHEEL="${1:-}"
-
-###############################################################################
-# Helpers
-###############################################################################
-
-print_banner() {
-cat <<EOF
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  REACHABLE Private Distribution
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
-}
-
-print_installer() {
-cat <<EOF
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  REACHABLE Installer v${VERSION}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
-}
-
-fail() {
-  echo
-  echo "✗ $1"
-  exit 1
-}
-
-###############################################################################
-# Virtual environment
-###############################################################################
-
-setup_venv() {
-  VENV_DIR="${HOME}/.reachable/venv"
-
-  if [[ ! -d "$VENV_DIR" ]]; then
-    echo "▶ Creating virtual environment"
-    python3 -m venv "$VENV_DIR"
-  fi
-
-  # shellcheck disable=SC1091
-  source "$VENV_DIR/bin/activate"
-
-  python -m pip install --upgrade pip >/dev/null
-}
-
-###############################################################################
-# Post-install instructions
-###############################################################################
-
-print_next_steps() {
-  echo
-  echo "============================================================"
-  echo "✔ REACHABLE installed successfully!"
-  echo "============================================================"
-  echo
-  echo "NEXT STEPS:"
-  echo
-  echo "1. ADD TO PATH (add to ~/.zshrc or ~/.bashrc):"
-  echo
-  echo '   export PATH="$HOME/.reachable/venv/bin:$PATH"'
-  echo
-  echo "   Then reload your shell:"
-  echo "     source ~/.zshrc"
-  echo
-  echo "2. SET GITHUB TOKEN (for cloning vulnerable libraries):"
-  echo
-  echo "   export GITHUB_TOKEN='ghp_your_token_here'"
-  echo
-  echo "   Token requires 'repo' scope for read access to all repositories."
-  echo "   Create at: https://github.com/settings/tokens"
-  echo
-  echo "   For Claude Desktop MCP integration, also set:"
-  echo "   export MCP_GITHUB_TOKEN='ghp_your_token_here'"
-  echo
-  echo "3. RUN YOUR FIRST SCAN:"
-  echo
-  echo "   reachctl scan /path/to/your/repo"
-  echo
-  echo "   First scan takes ~1-2 min extra to download vulnerability databases."
-  echo
-  echo "OTHER COMMANDS:"
-  echo "   reachctl doctor     # Check tool dependencies"
-  echo "   reachctl primer     # Quick-start guide"
-  echo "   reachctl version    # Show version info"
-  echo
-  echo "============================================================"
-}
-
-###############################################################################
-# Local wheel install (NO GitHub, NO token)
-###############################################################################
-
-install_local_wheel() {
-  [[ -f "$LOCAL_WHEEL" ]] || fail "Wheel not found: $LOCAL_WHEEL"
-
-  echo
-  echo "▶ Installing local wheel"
-  echo "  Wheel: $LOCAL_WHEEL"
-  echo
-
-  setup_venv
-  python -m pip install --force-reinstall "$LOCAL_WHEEL" || fail "pip install failed"
-
-  print_next_steps
-  exit 0
-}
-
-###############################################################################
-# GitHub auth
-###############################################################################
-
-require_github_token() {
-  if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-    cat <<EOF
-
-  A GitHub Personal Access Token is required to download from a private repo.
-
-  Classic PAT:
-    • scope: repo
-
-  Fine-grained PAT (recommended minimum):
-    • Repository access: ${REPO_OWNER}/${REPO_NAME}
-    • Contents: Read-only
-    • Metadata: Read-only (required)
-
-  Create token:
-    • Fine-grained: https://github.com/settings/personal-access-tokens/new
-    • Classic:      https://github.com/settings/tokens
-
-  Or set:
-    export GITHUB_TOKEN=ghp_xxxx
-
-EOF
-    read -s -p "  Enter GitHub Token: " GITHUB_TOKEN
-    echo
-    export GITHUB_TOKEN
-  fi
-
-  # Validate token early
-  # Use classic-compatible header format ("token ..."). Fine-grained tokens also work with this.
-  local tmp_body tmp_hdr http_code
-  tmp_body="$(mktemp)"
-  tmp_hdr="$(mktemp)"
-  trap 'rm -f "$tmp_body" "$tmp_hdr"' RETURN
-
-  http_code="$(curl -sS -L \
-    -D "$tmp_hdr" \
-    -o "$tmp_body" \
-    -w "%{http_code}" \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
-    -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/user" || true)"
-
-  if [[ "$http_code" != "200" ]]; then
-    echo
-    echo "✗ Token validation failed (HTTP $http_code)"
-    echo
-    echo "  Response headers (selected):"
-    grep -iE 'x-github|x-ratelimit|content-type|status' "$tmp_hdr" || true
-    echo
-    echo "  Response body (first 300 chars):"
-    head -c 300 "$tmp_body" || true
-    echo
-    fail "Invalid GitHub token or insufficient permissions"
-  fi
-}
-
-###############################################################################
-# Environment detection
-###############################################################################
-
-detect_environment() {
-  echo
-  echo "▶ Detecting environment"
-  echo
-
-  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  ARCH="$(uname -m)"
-
-  PYTHON_BIN="${PYTHON:-python3}"
-  PY_TAG="$($PYTHON_BIN - <<'EOF'
-import sys
-print(f"cp{sys.version_info.major}{sys.version_info.minor}")
-EOF
-)"
-
-  echo "  System Information"
-  echo "  ─────────────────────────────────────────────────────────────"
-  echo "  OS:            ${OS}"
-  echo "  Architecture:  ${ARCH}"
-  echo "  Python:        $($PYTHON_BIN --version | awk '{print $2}') (${PY_TAG})"
-  echo
-
-  # Determine platform tag based on OS, arch, and Python version
-  if [[ "$OS" == "darwin" ]]; then
-    # macOS universal2 wheels - platform tag varies by Python version
-    # Python 3.10-3.11: macosx_10_9_universal2
-    # Python 3.12-3.13: macosx_10_13_universal2
-    # Python 3.14+:     macosx_10_15_universal2
-    PLATFORM_TAG="$($PYTHON_BIN - <<'EOF'
-import sys
-minor = sys.version_info.minor
-if minor <= 11:
-    print("macosx_10_9_universal2")
-elif minor <= 13:
-    print("macosx_10_13_universal2")
-else:
-    print("macosx_10_15_universal2")
-EOF
-)"
-  elif [[ "$OS" == "linux" ]]; then
-    if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-      PLATFORM_TAG="linux_aarch64"
-    else
-      PLATFORM_TAG="linux_x86_64"
-    fi
-  else
-    fail "Unsupported OS: $OS"
-  fi
-
-  # Convert VERSION like "1.0.0-beta7" -> "1.0.0b7" (PEP 440)
-  WHEEL_VERSION="$(python3 - <<PY
-import re
-v="${VERSION}"
-m=re.match(r"^(\d+\.\d+\.\d+)-beta(\d+)$", v)
-print(f"{m.group(1)}b{m.group(2)}" if m else v)
-PY
-)"
-
-  WHEEL_NAME="${PACKAGE_NAME}-${WHEEL_VERSION}-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
-  WHEEL_DIR="wheels/v${VERSION}"
-
-  echo "  Package Information"
-  echo "  ─────────────────────────────────────────────────────────────"
-  echo "  Version:       ${VERSION}"
-  echo "  Wheel:         ${WHEEL_NAME}"
-  echo "  Directory:     ${WHEEL_DIR} (ref: ${REPO_REF})"
-  echo
-}
-
-###############################################################################
-# Download wheel from GitHub repo directory (Contents API)
-###############################################################################
-
-download_wheel() {
-  echo "▶ Downloading wheel"
-  echo "  Source: ${REPO_OWNER}/${REPO_NAME}/${WHEEL_DIR} (ref: ${REPO_REF})"
-
-  local api_base dir_url tmp_body tmp_hdr http_code
-  api_base="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents"
-  dir_url="${api_base}/${WHEEL_DIR}?ref=${REPO_REF}"
-
-  tmp_body="$(mktemp)"
-  tmp_hdr="$(mktemp)"
-  trap 'rm -f "$tmp_body" "$tmp_hdr"' RETURN
-
-  # Fetch directory listing into a file (avoid JSONDecodeError due to empty/non-JSON stdin)
-  http_code="$(curl -sS -L \
-    -D "$tmp_hdr" \
-    -o "$tmp_body" \
-    -w "%{http_code}" \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
-    -H "Accept: application/vnd.github+json" \
-    "$dir_url" || true)"
-
-  if [[ "$http_code" != "200" ]]; then
-    echo
-    echo "✗ GitHub API returned HTTP $http_code for directory listing"
-    echo "  URL: $dir_url"
-    echo
-    echo "  Response headers (selected):"
-    grep -iE 'x-github|x-ratelimit|content-type|status' "$tmp_hdr" || true
-    echo
-    echo "  Response body (first 400 chars):"
-    head -c 400 "$tmp_body" || true
-    echo
-    fail "Cannot access ${WHEEL_DIR}. Check token access, SSO, and ref/path."
-  fi
-
-  # Validate listing is a JSON array and check for target wheel
-  local found
-  found="$(python3 - <<PY "$tmp_body"
-import json, sys
-p=sys.argv[1]
-with open(p, "r", encoding="utf-8", errors="replace") as f:
-    data=json.load(f)
-want="${WHEEL_NAME}"
-ok=any(i.get("type")=="file" and i.get("name")==want for i in data) if isinstance(data, list) else False
-print("yes" if ok else "no")
-PY
-)"
-
-  if [[ "$found" != "yes" ]]; then
-    echo
-    echo "✗ Compatible wheel not found in ${WHEEL_DIR}: ${WHEEL_NAME}"
-    echo
-    echo "  Available wheels:"
-    python3 - <<'PY' "$tmp_body"
-import json, sys
-data=json.load(open(sys.argv[1], "r", encoding="utf-8", errors="replace"))
-names=[i.get("name","") for i in data if i.get("type")=="file" and i.get("name","").endswith(".whl")]
-for n in sorted(names):
-    print(f"    • {n}")
-PY
-    echo
-    fail "Build/publish mismatch: installer expects ${WHEEL_NAME} but it is not present."
-  fi
-
-  # Download the file contents as raw bytes
-  local file_path file_url
-  file_path="${WHEEL_DIR}/${WHEEL_NAME}"
-  file_url="${api_base}/${file_path}?ref=${REPO_REF}"
-
-  http_code="$(curl -sS -L \
-    -D "$tmp_hdr" \
-    -o "${WHEEL_NAME}" \
-    -w "%{http_code}" \
-    -H "Authorization: token ${GITHUB_TOKEN}" \
-    -H "Accept: application/vnd.github.raw" \
-    "$file_url" || true)"
-
-  if [[ "$http_code" != "200" ]]; then
-    echo
-    echo "✗ Download failed (HTTP $http_code)"
-    echo "  URL: $file_url"
-    echo
-    echo "  Response headers (selected):"
-    grep -iE 'x-github|x-ratelimit|content-type|status' "$tmp_hdr" || true
-    echo
-    fail "Download failed (Contents API raw). Check PAT permissions / SSO."
-  fi
-
-  echo "  ✓ Downloaded ${WHEEL_NAME}"
-  echo
-}
-
-###############################################################################
-# Install downloaded wheel
-###############################################################################
-
-install_downloaded_wheel() {
-  setup_venv
-  python -m pip install --force-reinstall "./${WHEEL_NAME}" || fail "pip install failed"
-}
-
-###############################################################################
-# Main
-###############################################################################
-
-print_banner
-
-# --- LOCAL MODE SHORT-CIRCUIT ---
-if [[ -n "$LOCAL_WHEEL" ]]; then
-  if [[ $# -gt 1 ]]; then
-    fail "Too many arguments. Usage: install.sh [path/to/wheel]"
-  fi
-  install_local_wheel
+# Apply custom version if specified
+if [[ -n "$CUSTOM_VERSION" ]]; then
+    VERSION="$CUSTOM_VERSION"
+    # Convert 1.0.0-beta8 to 1.0.0b8 for wheel filename
+    WHEEL_VERSION=$(echo "$VERSION" | sed 's/-beta/b/')
 fi
 
-# --- REMOTE MODE ---
-require_github_token
-print_installer
-detect_environment
-download_wheel
-install_downloaded_wheel
-print_next_steps
+# -----------------------------------------------------------------------------
+# Colors & Formatting
+# -----------------------------------------------------------------------------
+if [[ -t 1 ]]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    DIM='\033[2m'
+    NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' DIM='' NC=''
+fi
 
+# -----------------------------------------------------------------------------
+# Helper Functions
+# -----------------------------------------------------------------------------
+print_header() {
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}  $1${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+print_step() {
+    echo -e "\n${CYAN}▶${NC} ${BOLD}$1${NC}"
+}
+
+print_ok() {
+    echo -e "  ${GREEN}✓${NC} $1"
+}
+
+print_warn() {
+    echo -e "  ${YELLOW}⚠${NC} $1"
+}
+
+print_error() {
+    echo -e "  ${RED}✗${NC} $1"
+}
+
+print_info() {
+    echo -e "  ${DIM}$1${NC}"
+}
+
+# -----------------------------------------------------------------------------
+# Detect Environment
+# -----------------------------------------------------------------------------
+detect_environment() {
+    print_step "Detecting environment"
+    
+    # OS
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    case "$OS" in
+        darwin) OS_NAME="macOS" ;;
+        linux)  OS_NAME="Linux" ;;
+        *)      print_error "Unsupported OS: $OS"; exit 1 ;;
+    esac
+    
+    # Architecture
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  ARCH_NAME="x86_64" ;;
+        aarch64) ARCH_NAME="ARM64" ;;
+        arm64)   ARCH_NAME="ARM64" ;;
+        *)       print_error "Unsupported architecture: $ARCH"; exit 1 ;;
+    esac
+    
+    # Python version
+    if ! command -v python3 &> /dev/null; then
+        print_error "Python 3 not found"
+        exit 1
+    fi
+    
+    PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    PY_MAJOR=$(echo $PY_VERSION | cut -d. -f1)
+    PY_MINOR=$(echo $PY_VERSION | cut -d. -f2)
+    
+    if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 10 ]]; then
+        print_error "Python 3.10+ required (found $PY_VERSION)"
+        exit 1
+    fi
+    
+    PY_TAG="cp${PY_VERSION//./}"
+    
+    # Platform tag for wheel
+    if [[ "$OS" == "darwin" ]]; then
+        if [[ "$ARCH" == "arm64" ]]; then
+            PLATFORM_TAG="macosx_14_0_arm64"
+        else
+            print_error "macOS Intel (x86_64) wheels are not currently available."
+            echo ""
+            echo "  Options:"
+            echo "    1. Install from source: pip install git+https://github.com/sthenos-security/reach-core.git"
+            echo "    2. Contact support: adazzi@sthenosec.com"
+            exit 1
+        fi
+    else
+        if [[ "$ARCH" == "aarch64" ]]; then
+            PLATFORM_TAG="manylinux_2_28_aarch64"
+        else
+            PLATFORM_TAG="manylinux_2_28_x86_64"
+        fi
+    fi
+    
+    WHEEL_FILE="reachable-${WHEEL_VERSION}-${PY_TAG}-${PY_TAG}-${PLATFORM_TAG}.whl"
+    
+    print_ok "OS:           $OS_NAME $ARCH_NAME"
+    print_ok "Python:       $PY_VERSION ($PY_TAG)"
+    print_ok "Wheel:        $WHEEL_FILE"
+}
+
+# -----------------------------------------------------------------------------
+# Setup GitHub CLI
+# -----------------------------------------------------------------------------
+setup_gh_cli() {
+    print_step "Checking GitHub CLI"
+    
+    if command -v gh &> /dev/null; then
+        GH_VERSION=$(gh --version | head -1 | awk '{print $3}')
+        print_ok "GitHub CLI installed (v$GH_VERSION)"
+    else
+        print_warn "GitHub CLI not found - installing..."
+        
+        if [[ "$OS" == "darwin" ]]; then
+            if command -v brew &> /dev/null; then
+                brew install gh
+            else
+                print_error "Homebrew not found. Install from https://brew.sh"
+                exit 1
+            fi
+        elif [[ "$OS" == "linux" ]]; then
+            if command -v apt-get &> /dev/null; then
+                # Debian/Ubuntu
+                curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+                sudo apt-get update -qq
+                sudo apt-get install -y gh
+            elif command -v dnf &> /dev/null; then
+                # RHEL/Fedora
+                sudo dnf install -y gh
+            elif command -v yum &> /dev/null; then
+                # CentOS
+                sudo yum install -y gh
+            else
+                print_error "Could not detect package manager"
+                echo ""
+                echo "  Install GitHub CLI manually:"
+                echo "  https://github.com/cli/cli#installation"
+                exit 1
+            fi
+        fi
+        
+        print_ok "GitHub CLI installed"
+    fi
+    
+    # Check authentication
+    print_step "Checking GitHub authentication"
+    
+    if gh auth status &> /dev/null; then
+        GH_USER=$(gh api user --jq '.login' 2>/dev/null || echo "authenticated")
+        print_ok "Logged in as: $GH_USER"
+    else
+        print_warn "Not authenticated - starting login..."
+        echo ""
+        echo -e "  ${DIM}A browser window will open, or you'll see a code to enter at github.com/login/device${NC}"
+        echo ""
+        gh auth login -h github.com -p https -w
+        print_ok "Authentication complete"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Handle Existing Installation
+# -----------------------------------------------------------------------------
+handle_existing_install() {
+    INSTALLED_VERSION=""
+    BACKUP_DIR=""
+    
+    if pip3 show reachable &> /dev/null; then
+        INSTALLED_VERSION=$(pip3 show reachable | grep "^Version:" | awk '{print $2}')
+        print_step "Existing installation detected"
+        print_info "Installed version: $INSTALLED_VERSION"
+        print_info "Target version:    $WHEEL_VERSION"
+        
+        if [[ "$UPDATE_MODE" == true ]]; then
+            # Backup existing data
+            if [[ -d "$HOME/.reachable" ]]; then
+                BACKUP_DIR="$HOME/.reachable.backup.$(date +%Y%m%d-%H%M%S)"
+                print_step "Backing up existing data"
+                cp -r "$HOME/.reachable" "$BACKUP_DIR" 2>/dev/null || true
+                print_ok "Backup created: $BACKUP_DIR"
+            fi
+        elif [[ "$CLEAN_DATA" == false ]]; then
+            # Fresh install mode without --clean - warn user
+            echo ""
+            print_warn "REACHABLE is already installed (v$INSTALLED_VERSION)"
+            echo ""
+            echo -e "  ${BOLD}Options:${NC}"
+            echo "    • To upgrade (keeps data):    curl ... | bash -s -- --update"
+            echo "    • To clean install (beta):    curl ... | bash -s -- --clean"
+            echo ""
+            echo -e "  ${YELLOW}⚠ Beta Notice:${NC} During beta, we recommend --clean to avoid"
+            echo "    database compatibility issues between versions."
+            echo ""
+            
+            read -p "  Continue with upgrade (keeps data)? [y/N] " -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Installation cancelled"
+                exit 0
+            fi
+            UPDATE_MODE=true
+        fi
+    fi
+    
+    # Handle --clean flag
+    if [[ "$CLEAN_DATA" == true ]] && [[ -d "$HOME/.reachable" ]]; then
+        print_step "Removing existing data (--clean)"
+        rm -rf "$HOME/.reachable"
+        print_ok "Removed ~/.reachable"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Download & Install
+# -----------------------------------------------------------------------------
+download_and_install() {
+    print_step "Downloading wheel"
+    
+    DOWNLOAD_DIR=$(mktemp -d)
+    cd "$DOWNLOAD_DIR"
+    
+    print_info "Repository: github.com/$REPO"
+    print_info "Release:    v$VERSION"
+    print_info "File:       $WHEEL_FILE"
+    
+    if ! gh release download "v${VERSION}" --repo "$REPO" --pattern "$WHEEL_FILE" 2>/dev/null; then
+        print_error "Download failed"
+        echo ""
+        echo "  Possible causes:"
+        echo "    • No access to repository (contact adazzi@sthenosec.com)"
+        echo "    • Wheel for Python $PY_VERSION not available"
+        echo "    • Version v$VERSION does not exist"
+        echo ""
+        echo "  Available releases:"
+        gh release list --repo "$REPO" --limit 5 2>/dev/null | sed 's/^/    /' || echo "    (unable to list)"
+        echo ""
+        echo "  Available wheels in v$VERSION:"
+        gh release view "v${VERSION}" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | sed 's/^/    /' || echo "    (unable to list)"
+        exit 1
+    fi
+    
+    print_ok "Downloaded successfully"
+    
+    # Uninstall previous version
+    if pip3 show reachable &> /dev/null; then
+        print_step "Removing previous installation"
+        pip3 uninstall reachable -y -q
+        print_ok "Previous version removed"
+    fi
+    
+    # Install
+    print_step "Installing REACHABLE v$VERSION"
+    pip3 install "$WHEEL_FILE" -q
+    print_ok "Installation complete"
+    
+    # Cleanup
+    rm -rf "$DOWNLOAD_DIR"
+}
+
+# -----------------------------------------------------------------------------
+# Verify Installation
+# -----------------------------------------------------------------------------
+verify_installation() {
+    print_header "Verification"
+    
+    echo ""
+    echo -e "${BOLD}Version:${NC}"
+    reachctl version 2>&1 | sed 's/^/  /'
+    
+    echo ""
+    echo -e "${BOLD}Self-test:${NC}"
+    if reachctl selftest 2>&1 | sed 's/^/  /'; then
+        print_ok "All checks passed"
+    else
+        print_warn "Some optional dependencies missing"
+        print_info "Run 'reachctl doctor' to install them"
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Print Success Message
+# -----------------------------------------------------------------------------
+print_success() {
+    echo ""
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    if [[ "$UPDATE_MODE" == true ]]; then
+        echo -e "${GREEN}  ✓ REACHABLE upgraded successfully!${NC}"
+    elif [[ "$CLEAN_DATA" == true ]]; then
+        echo -e "${GREEN}  ✓ REACHABLE installed successfully! (clean install)${NC}"
+    else
+        echo -e "${GREEN}  ✓ REACHABLE installed successfully!${NC}"
+    fi
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${BOLD}Quick Start:${NC}"
+    echo ""
+    echo "    reachctl primer          # View quick-start guide"
+    echo "    reachctl doctor          # Check/install dependencies"
+    echo "    reachctl scan /path      # Scan a repository"
+    echo ""
+    if [[ -n "$BACKUP_DIR" ]]; then
+        echo -e "  ${BOLD}Note:${NC} Previous data backed up to:"
+        echo "    $BACKUP_DIR"
+        echo ""
+    fi
+    echo -e "  ${BOLD}Future Upgrades:${NC}"
+    echo "    curl -sSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash -s -- --update"
+    echo ""
+    echo -e "  ${BOLD}Support:${NC} adazzi@sthenosec.com"
+    echo ""
+}
+
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
+main() {
+    if [[ "$UPDATE_MODE" == true ]]; then
+        print_header "REACHABLE Upgrade v${VERSION}"
+    elif [[ "$CLEAN_DATA" == true ]]; then
+        print_header "REACHABLE Clean Install v${VERSION}"
+    else
+        print_header "REACHABLE Installer v${VERSION}"
+    fi
+    
+    detect_environment
+    setup_gh_cli
+    handle_existing_install
+    download_and_install
+    verify_installation
+    print_success
+}
+
+main "$@"

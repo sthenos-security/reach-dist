@@ -4,6 +4,46 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
+## [1.0.0-beta8] - 2026-01-13
+
+### Added
+- **Installer upgrade support**: `--update` flag backs up existing data before upgrade
+- **Clean install option**: `--clean` flag removes existing data (recommended for beta upgrades)
+- **Version pinning**: `--version` flag to install specific versions
+- **Risk Inventory collapsible**: Table now collapsible within Engineering Remediation panel
+- **Not Fixable count**: CVE Summary now shows both "Fixable Now" and "Not Fixable" counts
+
+### Changed
+- Dashboard v4.5.23 with improved UI:
+  - Risk & Posture panel: Red accent (was green - semantically incorrect)
+  - Engineering Remediation panel: Indigo accent (was orange)
+  - Funnel title centered: "REACHABLE Analysis Funnel"
+  - Simplified action text: "X issues require immediate remediation"
+  - Review text: "X issues require review/investigation (unknown reachability)"
+  - Counter colors: Red for immediate (ef4444), Amber for review (f59e0b)
+- Removed "Packages to Remove" metric (unreliable data source)
+- Renamed "Static Analysis" → "Static Malware" throughout
+- Renamed "Dynamic Analysis" → "Dynamic Malware" throughout
+- Removed duplicate panel headers
+
+### Fixed
+- Duplicate "Engineering Remediation" header removed
+- Funnel title font and alignment restored
+- DIV balance issues in dashboard template
+
+### Upgrade Notes
+During beta, database schema may change between versions. **Recommended upgrade procedure:**
+
+```bash
+# Clean install (removes scan history, avoids compatibility issues)
+curl -sSL .../install.sh | bash -s -- --clean
+
+# Or upgrade with backup (keeps data, may have issues)
+curl -sSL .../install.sh | bash -s -- --update
+```
+
+---
+
 ## [1.0.0-beta7] - 2026-01-12
 
 ### Added
@@ -85,29 +125,27 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
-## Wheel Matrix (v1.0.0-beta7)
+## Upgrading Between Versions
 
-Each release includes **15 wheels**:
+### Standard Upgrade (preserves data)
 
-### Linux
+```bash
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
+```
 
-| Python | x86_64 | ARM64 |
-|--------|--------|-------|
-| 3.10 | `linux_x86_64` | `linux_aarch64` |
-| 3.11 | `linux_x86_64` | `linux_aarch64` |
-| 3.12 | `linux_x86_64` | `linux_aarch64` |
-| 3.13 | `linux_x86_64` | `linux_aarch64` |
-| 3.14 | `linux_x86_64` | `linux_aarch64` |
+### Clean Upgrade (recommended for beta)
 
-### macOS (Universal - Intel + Apple Silicon)
+```bash
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --clean
+```
 
-| Python | Platform Tag | Min macOS |
-|--------|--------------|-----------|
-| 3.10 | `macosx_10_9_universal2` | 10.9 |
-| 3.11 | `macosx_10_9_universal2` | 10.9 |
-| 3.12 | `macosx_10_13_universal2` | 10.13 |
-| 3.13 | `macosx_10_13_universal2` | 10.13 |
-| 3.14 | `macosx_10_15_universal2` | 10.15 |
+### If You Encounter Issues
+
+```bash
+# Remove all data and reinstall
+rm -rf ~/.reachable
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+```
 
 ---
 

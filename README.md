@@ -6,46 +6,63 @@ Official distribution repository for REACHABLE wheel packages.
 
 ## Quick Install
 
-### Option 1: Automated Install (Recommended)
-
 ```bash
-# Download installer
-curl -LO https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh
-
-# Make executable (just in case)
-chmod +x install.sh
-
-# Run installer
-./install.sh
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
 ```
 
 The installer will:
-1. Prompt for your GitHub Personal Access Token
-2. Auto-detect your OS, architecture, and Python version
-3. Download and install the correct wheel
-4. Create an isolated virtual environment at `~/.reachable/venv`
+1. Check for GitHub CLI (`gh`) and install if needed
+2. Authenticate with GitHub (browser-based, secure)
+3. Auto-detect your OS, architecture, and Python version
+4. Download and install the correct wheel
 
-**GitHub Token Setup:**
-- Go to https://github.com/settings/tokens
-- Create a **Classic** token with `repo` scope enabled
-- Or set `export GITHUB_TOKEN=ghp_xxx` before running
+---
 
-### Option 2: Manual Wheel Install
+## Upgrading
 
-If you prefer to download the wheel manually:
+### Standard Upgrade
+
+To upgrade from one beta version to another:
 
 ```bash
-# Download install.sh and your wheel
-curl -LO https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh
-chmod +x install.sh
-
-# Install from local wheel (no GitHub token needed)
-./install.sh path/to/reachable-1.0.0b7-cpXYZ-cpXYZ-PLATFORM.whl
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
 ```
 
-Wheels are available in:
-- `wheels/latest/` — Latest release
-- `wheels/v1.0.0-beta7/` — Specific version
+This will:
+1. Backup your existing data (`~/.reachable` → `~/.reachable.backup.YYYYMMDD-HHMMSS`)
+2. Uninstall the previous version
+3. Install the new version
+4. Preserve your scan history and configuration
+
+### Clean Upgrade (Recommended for Beta)
+
+During beta, some releases may include breaking changes to the database schema. If you encounter issues after upgrading, perform a clean install:
+
+```bash
+# Option 1: Use --clean flag (removes data, then installs)
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --clean
+
+# Option 2: Manual clean install
+rm -rf ~/.reachable
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+```
+
+> **⚠️ Beta Notice:** During the beta period, we recommend using `--clean` when upgrading between versions to avoid potential compatibility issues. Your scan history will be reset, but this ensures a stable experience.
+
+### Install Specific Version
+
+```bash
+curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --version 1.0.0-beta8
+```
+
+### Installer Options
+
+| Option | Description |
+|--------|-------------|
+| `--update`, `-u` | Upgrade existing installation (backs up data) |
+| `--clean` | Remove existing data before install |
+| `--version`, `-v` | Install specific version (e.g., `1.0.0-beta9`) |
+| `--help`, `-h` | Show help |
 
 ---
 
@@ -53,136 +70,93 @@ Wheels are available in:
 
 - **Python:** 3.10, 3.11, 3.12, 3.13, or 3.14
 - **OS:** Linux or macOS
-- **Architecture:** x86_64 or ARM64 (macOS wheels are universal - work on both)
+- **Architecture:** x86_64 or ARM64
+- **GitHub CLI:** Installed automatically if missing
 
 ---
 
 ## Post-Installation
 
-### Add to PATH
-
-After installation, add the REACHABLE bin directory to your PATH:
-
-```bash
-# Add to ~/.bashrc or ~/.zshrc
-export PATH="$HOME/.reachable/venv/bin:$PATH"
-
-# Reload shell
-source ~/.zshrc  # or ~/.bashrc
-```
-
 ### Verify Installation
 
 ```bash
-reachctl version
-reachctl selftest
-reachctl primer    # Quick-start guide
+reachctl version     # Check installed version
+reachctl selftest    # Run self-diagnostics
+reachctl primer      # Quick-start guide
+reachctl doctor      # Check/install dependencies
 ```
 
-### Check Dependencies
+### First Scan
 
 ```bash
-reachctl doctor
+reachctl scan /path/to/your/repo
 ```
 
 ---
 
-## Wheel Matrix (v1.0.0-beta7)
+## Data Storage
 
-Each release includes **15 wheels** (5 Python versions × 3 platforms):
+REACHABLE stores data in `~/.reachable/`:
 
-### Linux
+```
+~/.reachable/
+├── scans/           # Scan history and results (per-repo databases)
+├── cache/           # Cached SBOM and call graph data
+└── config/          # Configuration files
+```
 
-| Python | x86_64 | ARM64 |
-|--------|--------|-------|
-| 3.10 | `reachable-1.0.0b7-cp310-cp310-linux_x86_64.whl` | `reachable-1.0.0b7-cp310-cp310-linux_aarch64.whl` |
-| 3.11 | `reachable-1.0.0b7-cp311-cp311-linux_x86_64.whl` | `reachable-1.0.0b7-cp311-cp311-linux_aarch64.whl` |
-| 3.12 | `reachable-1.0.0b7-cp312-cp312-linux_x86_64.whl` | `reachable-1.0.0b7-cp312-cp312-linux_aarch64.whl` |
-| 3.13 | `reachable-1.0.0b7-cp313-cp313-linux_x86_64.whl` | `reachable-1.0.0b7-cp313-cp313-linux_aarch64.whl` |
-| 3.14 | `reachable-1.0.0b7-cp314-cp314-linux_x86_64.whl` | `reachable-1.0.0b7-cp314-cp314-linux_aarch64.whl` |
+### Data Retention
 
-### macOS (Universal - Intel + Apple Silicon)
+- Scans are retained for 30 days by default
+- Maximum 30 scans per branch
+- Use `reachctl db trim` to manually clean old data
 
-| Python | Wheel | Min macOS |
-|--------|-------|-----------|
-| 3.10 | `reachable-1.0.0b7-cp310-cp310-macosx_10_9_universal2.whl` | 10.9 |
-| 3.11 | `reachable-1.0.0b7-cp311-cp311-macosx_10_9_universal2.whl` | 10.9 |
-| 3.12 | `reachable-1.0.0b7-cp312-cp312-macosx_10_13_universal2.whl` | 10.13 |
-| 3.13 | `reachable-1.0.0b7-cp313-cp313-macosx_10_13_universal2.whl` | 10.13 |
-| 3.14 | `reachable-1.0.0b7-cp314-cp314-macosx_10_15_universal2.whl` | 10.15 |
+### Backup Your Data
 
-> **Note:** All macOS wheels are `universal2` and work on **both** Intel and Apple Silicon Macs.
+```bash
+# Manual backup
+cp -r ~/.reachable ~/.reachable.backup
+
+# The --update flag does this automatically
+```
 
 ---
 
-## GitHub Authentication for Scanning
+## GitHub Authentication
 
-After installation, REACHABLE needs GitHub access to clone vulnerable library source code for reachability analysis. This requires **read permissions on all repositories** (public and private).
+REACHABLE needs GitHub access to clone vulnerable library source code for reachability analysis.
 
-### Option 1: SSH Key (Recommended for Developers)
+### Recommended: GitHub CLI (Automatic)
+
+The installer uses GitHub CLI for authentication. If not installed, it will be set up automatically.
 
 ```bash
-# Check if SSH is configured
-ssh -T git@github.com
+# Check authentication status
+gh auth status
 
-# If not, generate a key and add to GitHub
-ssh-keygen -t ed25519
-# Add ~/.ssh/id_ed25519.pub to https://github.com/settings/keys
+# Re-authenticate if needed
+gh auth login
 ```
 
-### Option 2: GitHub Token (Recommended for CI/CD)
+### Alternative: Environment Variables
 
 ```bash
+# For CI/CD or automation
 export GITHUB_TOKEN='ghp_your_token_here'
 ```
 
 **Required scope:** `repo` (grants read access to public AND private repositories)
-
-### Option 3: MCP GitHub Token (Claude Desktop Integration)
-
-```bash
-export MCP_GITHUB_TOKEN='ghp_your_token_here'
-```
-
-**Same scope requirements** - needs `repo` scope for full read access.
-
-Used for MCP-based cloning. Falls back to regular git if unavailable.
-
-### Token Priority
-
-1. `MCP_GITHUB_TOKEN`
-2. `GITHUB_TOKEN`
-3. `GH_TOKEN`
-4. SSH key
 
 ---
 
 ## Uninstall
 
 ```bash
-# Remove the virtual environment and all data
-rm -rf ~/.reachable
-```
-
----
-
-## Reinstall / Upgrade
-
-The installer uses `--force-reinstall`, so you can simply re-run it:
-
-```bash
-# Re-run installer (automatically replaces existing installation)
-./install.sh
-```
-
-For a completely clean reinstall:
-
-```bash
-# Remove existing installation first
+# Remove everything
 rm -rf ~/.reachable
 
-# Run installer
-./install.sh
+# Uninstall package
+pip3 uninstall reachable
 ```
 
 ---
@@ -191,45 +165,61 @@ rm -rf ~/.reachable
 
 ### "Command not found: reachctl"
 
-Add REACHABLE's venv bin directory to your PATH:
+The package installs to your Python user bin. Ensure it's in your PATH:
 
 ```bash
-# Add to ~/.bashrc or ~/.zshrc
-export PATH="$HOME/.reachable/venv/bin:$PATH"
+# Check where it installed
+pip3 show reachable | grep Location
 
-# Reload
-source ~/.zshrc
+# Usually need to add to PATH
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### "No matching distribution found"
+### Upgrade Issues
 
-Ensure you're downloading the correct wheel for your Python version:
-
-```bash
-# Check Python version
-python3 -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')"
-```
-
-### Permission Errors
+If you encounter errors after upgrading:
 
 ```bash
+# Clean install (removes data)
 rm -rf ~/.reachable
-./install.sh
+curl -sSL .../install.sh | bash
 ```
 
-### Token Issues
+### GitHub Authentication Fails
 
-If the installer fails with token errors:
-1. Ensure you're using a **Classic** PAT (not fine-grained)
-2. Verify the `repo` scope is enabled
-3. Check if SSO authorization is required for your organization
+```bash
+# Re-authenticate
+gh auth logout
+gh auth login -h github.com -p https -w
+```
+
+### Database Errors
+
+During beta, database schema may change between versions:
+
+```bash
+# Reset database
+rm -rf ~/.reachable/scans
+reachctl scan /path/to/repo  # Will recreate
+```
+
+---
+
+## Version History
+
+| Version | Date | Notes |
+|---------|------|-------|
+| 1.0.0-beta8 | 2026-01-13 | Dashboard v4.5.23, improved remediation UI |
+| 1.0.0-beta7 | 2026-01-10 | Initial beta release |
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
 ---
 
 ## Support
 
 - **Email:** adazzi@sthenosec.com
-- **Documentation:** [reach-core/docs](https://github.com/sthenos-security/reach-core/tree/main/docs)
+- **Issues:** [GitHub Issues](https://github.com/sthenos-security/reach-dist/issues)
 
 ---
 
