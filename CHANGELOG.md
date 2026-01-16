@@ -4,6 +4,21 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
+## [1.0.0-beta10] - 2026-01-16
+
+### Fixed
+- **Dashboard data embedding**: Fixed silent failure in HTML data injection
+- **Reachability mapping**: Fixed incorrect `is_reachable` values for secrets and config
+  - Unknown secrets now correctly set `is_reachable=True` (conservative approach)
+  - Config issues now correctly set `is_reachable=None` (runtime-dependent)
+- **Python cache issues**: `reachctl` now clears `__pycache__` and uses `--no-cache-dir` for pip installs
+
+### Changed
+- Dashboard trends chart now displays correctly with multiple scans
+- Improved source code installation reliability
+
+---
+
 ## [1.0.0-beta8] - 2026-01-13
 
 ### Added

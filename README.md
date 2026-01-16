@@ -209,6 +209,7 @@ reachctl scan /path/to/repo  # Will recreate
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.0.0-beta10 | 2026-01-16 | Fix dashboard reachability mapping |
 | 1.0.0-beta8 | 2026-01-13 | Dashboard v4.5.23, improved remediation UI |
 | 1.0.0-beta7 | 2026-01-10 | Initial beta release |
 
