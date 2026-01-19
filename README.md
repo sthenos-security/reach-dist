@@ -21,7 +21,8 @@ The installer will prompt for GitHub authentication via `gh auth login`.
 ```bash
 export GITHUB_TOKEN=ghp_your_token_here
 curl -H "Authorization: token $GITHUB_TOKEN" \
-  -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+  -H "Accept: application/vnd.github.v3.raw" \
+  -sL https://api.github.com/repos/sthenos-security/reach-dist/contents/install.sh | bash
 ```
 
 Requires a PAT with `repo` scope.

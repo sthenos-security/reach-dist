@@ -20,7 +20,8 @@
 #    # Option 2: curl with token
 #    export GITHUB_TOKEN=ghp_xxxx
 #    curl -H "Authorization: token $GITHUB_TOKEN" \
-#      -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+#      -H "Accept: application/vnd.github.v3.raw" \
+#      -sL https://api.github.com/repos/sthenos-security/reach-dist/contents/install.sh | bash
 #
 #    # Option 3: Local wheel install (download both files first)
 #    ./install.sh --wheel ./wheels/latest/reachable-1.0.0b10-cp311-*.whl
@@ -449,7 +450,7 @@ print_success() {
         echo ""
     fi
     echo -e "  ${BOLD}Future Upgrades:${NC}"
-    echo "    git -C /path/to/reach-dist pull && ./install.sh --update"
+    echo "    cd /path/to/reach-dist && git pull && ./install.sh --update"
     echo ""
     echo -e "  ${BOLD}Support:${NC} adazzi@sthenosec.com"
     echo ""
