@@ -38,8 +38,8 @@ set -e
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-VERSION="1.0.0-beta10"
-WHEEL_VERSION="1.0.0b10"
+VERSION="1.0.0b11"
+WHEEL_VERSION="1.0.0b11"
 REPO="sthenos-security/reach-dist"
 
 # -----------------------------------------------------------------------------
@@ -99,9 +99,9 @@ done
 
 # Apply custom version if specified
 if [[ -n "$CUSTOM_VERSION" ]]; then
-    VERSION="$CUSTOM_VERSION"
-    # Convert 1.0.0-beta8 to 1.0.0b8 for wheel filename
-    WHEEL_VERSION=$(echo "$VERSION" | sed 's/-beta/b/')
+    # Normalize to Python wheel format (1.0.0b11 not 1.0.0-beta11)
+    VERSION=$(echo "$CUSTOM_VERSION" | sed 's/-beta/b/')
+    WHEEL_VERSION="$VERSION"
 fi
 
 # -----------------------------------------------------------------------------
