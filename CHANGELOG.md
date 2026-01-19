@@ -4,7 +4,7 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
-## [1.0.0-beta10] - 2026-01-16
+## [1.0.0-beta10] - 2026-01-18
 
 ### Fixed
 - **Dashboard data embedding**: Fixed silent failure in HTML data injection
@@ -12,10 +12,18 @@ All notable changes to REACHABLE are documented here.
   - Unknown secrets now correctly set `is_reachable=True` (conservative approach)
   - Config issues now correctly set `is_reachable=None` (runtime-dependent)
 - **Python cache issues**: `reachctl` now clears `__pycache__` and uses `--no-cache-dir` for pip installs
+- **Dashboard JS fixes**: 
+  - Fixed duplicate `dashboardData` declaration causing console errors
+  - Added conditional `renderDashboard()` call (only when required elements exist)
+  - Proper `allIssues` array initialization
 
 ### Changed
 - Dashboard trends chart now displays correctly with multiple scans
 - Improved source code installation reliability
+- **Dead code cleanup**: Removed legacy `html_builder.py`, `index.html`, empty `templates/` dir
+
+### Removed
+- Old single-page dashboard builder (replaced by multi-page `html_builder_v2.py`)
 
 ---
 

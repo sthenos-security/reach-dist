@@ -6,15 +6,35 @@ Official distribution repository for REACHABLE wheel packages.
 
 ## Quick Install
 
+### Option 1: Clone and Run
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+git clone https://github.com/sthenos-security/reach-dist.git
+cd reach-dist
+./install.sh
 ```
 
-The installer will:
-1. Check for GitHub CLI (`gh`) and install if needed
-2. Authenticate with GitHub (browser-based, secure)
-3. Auto-detect your OS, architecture, and Python version
-4. Download and install the correct wheel
+The installer will prompt for GitHub authentication via `gh auth login`.
+
+### Option 2: curl with Token
+
+```bash
+export GITHUB_TOKEN=ghp_your_token_here
+curl -H "Authorization: token $GITHUB_TOKEN" \
+  -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+```
+
+Requires a PAT with `repo` scope.
+
+### Option 3: Local Wheel Install
+
+Download both files from the repo, then:
+
+```bash
+./install.sh --wheel ./wheels/latest/reachable-1.0.0b10-cp311-cp311-macosx_10_9_universal2.whl
+```
+
+Pick the wheel matching your Python version and OS from `wheels/latest/`.
 
 ---
 
@@ -22,10 +42,8 @@ The installer will:
 
 ### Standard Upgrade
 
-To upgrade from one beta version to another:
-
 ```bash
-curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
+./install.sh --update
 ```
 
 This will:
@@ -36,23 +54,25 @@ This will:
 
 ### Clean Upgrade (Recommended for Beta)
 
-During beta, some releases may include breaking changes to the database schema. If you encounter issues after upgrading, perform a clean install:
+During beta, some releases may include breaking changes to the database schema:
 
 ```bash
-# Option 1: Use --clean flag (removes data, then installs)
-curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --clean
-
-# Option 2: Manual clean install
-rm -rf ~/.reachable
-curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+./install.sh --clean
 ```
 
-> **⚠️ Beta Notice:** During the beta period, we recommend using `--clean` when upgrading between versions to avoid potential compatibility issues. Your scan history will be reset, but this ensures a stable experience.
+Or manually:
+
+```bash
+rm -rf ~/.reachable
+./install.sh
+```
+
+> **⚠️ Beta Notice:** During the beta period, we recommend using `--clean` when upgrading between versions to avoid potential compatibility issues.
 
 ### Install Specific Version
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --version 1.0.0-beta8
+./install.sh --version 1.0.0-beta10
 ```
 
 ### Installer Options
@@ -61,7 +81,8 @@ curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/ins
 |--------|-------------|
 | `--update`, `-u` | Upgrade existing installation (backs up data) |
 | `--clean` | Remove existing data before install |
-| `--version`, `-v` | Install specific version (e.g., `1.0.0-beta9`) |
+| `--version`, `-v` | Install specific version (e.g., `1.0.0-beta10`) |
+| `--wheel`, `-w` | Install from local wheel file (skips GitHub auth) |
 | `--help`, `-h` | Show help |
 
 ---
@@ -71,7 +92,7 @@ curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/ins
 - **Python:** 3.10, 3.11, 3.12, 3.13, or 3.14
 - **OS:** Linux or macOS
 - **Architecture:** x86_64 or ARM64
-- **GitHub CLI:** Installed automatically if missing
+- **GitHub Access:** Collaborator access to this repo + PAT with `repo` scope
 
 ---
 
@@ -105,58 +126,21 @@ REACHABLE stores data in `~/.reachable/`:
 └── config/          # Configuration files
 ```
 
-### Data Retention
-
-- Scans are retained for 30 days by default
-- Maximum 30 scans per branch
-- Use `reachctl db trim` to manually clean old data
-
 ### Backup Your Data
 
 ```bash
-# Manual backup
 cp -r ~/.reachable ~/.reachable.backup
-
-# The --update flag does this automatically
 ```
 
----
-
-## GitHub Authentication
-
-REACHABLE needs GitHub access to clone vulnerable library source code for reachability analysis.
-
-### Recommended: GitHub CLI (Automatic)
-
-The installer uses GitHub CLI for authentication. If not installed, it will be set up automatically.
-
-```bash
-# Check authentication status
-gh auth status
-
-# Re-authenticate if needed
-gh auth login
-```
-
-### Alternative: Environment Variables
-
-```bash
-# For CI/CD or automation
-export GITHUB_TOKEN='ghp_your_token_here'
-```
-
-**Required scope:** `repo` (grants read access to public AND private repositories)
+The `--update` flag does this automatically.
 
 ---
 
 ## Uninstall
 
 ```bash
-# Remove everything
-rm -rf ~/.reachable
-
-# Uninstall package
 pip3 uninstall reachable
+rm -rf ~/.reachable
 ```
 
 ---
@@ -165,42 +149,24 @@ pip3 uninstall reachable
 
 ### "Command not found: reachctl"
 
-The package installs to your Python user bin. Ensure it's in your PATH:
+Ensure Python user bin is in your PATH:
 
 ```bash
-# Check where it installed
-pip3 show reachable | grep Location
-
-# Usually need to add to PATH
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ### Upgrade Issues
 
-If you encounter errors after upgrading:
-
 ```bash
-# Clean install (removes data)
 rm -rf ~/.reachable
-curl -sSL .../install.sh | bash
+./install.sh
 ```
 
 ### GitHub Authentication Fails
 
 ```bash
-# Re-authenticate
 gh auth logout
 gh auth login -h github.com -p https -w
-```
-
-### Database Errors
-
-During beta, database schema may change between versions:
-
-```bash
-# Reset database
-rm -rf ~/.reachable/scans
-reachctl scan /path/to/repo  # Will recreate
 ```
 
 ---
@@ -209,7 +175,7 @@ reachctl scan /path/to/repo  # Will recreate
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 1.0.0-beta10 | 2026-01-16 | Fix dashboard reachability mapping |
+| 1.0.0-beta10 | 2026-01-18 | Dashboard v2 cleanup, JS fixes |
 | 1.0.0-beta8 | 2026-01-13 | Dashboard v4.5.23, improved remediation UI |
 | 1.0.0-beta7 | 2026-01-10 | Initial beta release |
 
@@ -220,7 +186,6 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 ## Support
 
 - **Email:** adazzi@sthenosec.com
-- **Issues:** [GitHub Issues](https://github.com/sthenos-security/reach-dist/issues)
 
 ---
 

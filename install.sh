@@ -12,17 +12,23 @@
 #  Copyright © 2026 Sthenos Security. All rights reserved.
 #
 #  Usage:
-#    # Fresh install
-#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
 #
-#    # Upgrade existing installation
-#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
+#    # Option 1: Clone and run (prompts for GitHub auth)
+#    git clone https://github.com/sthenos-security/reach-dist.git
+#    cd reach-dist && ./install.sh
 #
-#    # Clean install (removes existing data)
-#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --clean
+#    # Option 2: curl with token
+#    export GITHUB_TOKEN=ghp_xxxx
+#    curl -H "Authorization: token $GITHUB_TOKEN" \
+#      -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
 #
-#    # Specific version
-#    curl -sSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --version 1.0.0-beta9
+#    # Option 3: Local wheel install (download both files first)
+#    ./install.sh --wheel ./wheels/latest/reachable-1.0.0b10-cp311-*.whl
+#
+#  Other options:
+#    ./install.sh --update    # Upgrade with backup
+#    ./install.sh --clean     # Clean install (removes data)
+#    ./install.sh --version 1.0.0-beta10
 #
 # =============================================================================
 
@@ -31,8 +37,8 @@ set -e
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-VERSION="1.0.0-beta8"
-WHEEL_VERSION="1.0.0b8"
+VERSION="1.0.0-beta10"
+WHEEL_VERSION="1.0.0b10"
 REPO="sthenos-security/reach-dist"
 
 # -----------------------------------------------------------------------------
@@ -41,6 +47,7 @@ REPO="sthenos-security/reach-dist"
 UPDATE_MODE=false
 CUSTOM_VERSION=""
 CLEAN_DATA=false
+LOCAL_WHEEL=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -56,27 +63,28 @@ while [[ $# -gt 0 ]]; do
             CLEAN_DATA=true
             shift
             ;;
+        --wheel|-w)
+            LOCAL_WHEEL="$2"
+            shift 2
+            ;;
         --help|-h)
             echo "REACHABLE Installer"
             echo ""
             echo "Usage:"
-            echo "  curl -sSL .../install.sh | bash [OPTIONS]"
+            echo "  ./install.sh [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --update, -u       Upgrade existing installation (backs up data)"
-            echo "  --version, -v VER  Install specific version (e.g., 1.0.0-beta9)"
-            echo "  --clean            Remove existing data before install (recommended for beta upgrades)"
+            echo "  --clean            Remove existing data before install"
+            echo "  --version, -v VER  Install specific version (e.g., 1.0.0-beta10)"
+            echo "  --wheel, -w FILE   Install from local wheel file (skips download)"
             echo "  --help, -h         Show this help"
             echo ""
             echo "Examples:"
-            echo "  # Fresh install"
-            echo "  curl -sSL .../install.sh | bash"
-            echo ""
-            echo "  # Upgrade with backup"
-            echo "  curl -sSL .../install.sh | bash -s -- --update"
-            echo ""
-            echo "  # Clean install (beta recommended)"
-            echo "  curl -sSL .../install.sh | bash -s -- --clean"
+            echo "  ./install.sh                    # Fresh install (prompts for auth)"
+            echo "  ./install.sh --update           # Upgrade with backup"
+            echo "  ./install.sh --clean            # Clean install"
+            echo "  ./install.sh --wheel ./file.whl # Local wheel install"
             echo ""
             exit 0
             ;;
@@ -182,22 +190,23 @@ detect_environment() {
     PY_TAG="cp${PY_VERSION//./}"
     
     # Platform tag for wheel
+    # Note: macOS uses universal2 (supports both Intel and ARM)
+    # Linux uses simple linux_* tags (not manylinux)
     if [[ "$OS" == "darwin" ]]; then
-        if [[ "$ARCH" == "arm64" ]]; then
-            PLATFORM_TAG="macosx_14_0_arm64"
+        # macOS universal2 wheels - platform varies by Python version
+        if [[ "$PY_MINOR" -ge 14 ]]; then
+            PLATFORM_TAG="macosx_10_15_universal2"
+        elif [[ "$PY_MINOR" -ge 12 ]]; then
+            PLATFORM_TAG="macosx_10_13_universal2"
         else
-            print_error "macOS Intel (x86_64) wheels are not currently available."
-            echo ""
-            echo "  Options:"
-            echo "    1. Install from source: pip install git+https://github.com/sthenos-security/reach-core.git"
-            echo "    2. Contact support: adazzi@sthenosec.com"
-            exit 1
+            PLATFORM_TAG="macosx_10_9_universal2"
         fi
     else
+        # Linux
         if [[ "$ARCH" == "aarch64" ]]; then
-            PLATFORM_TAG="manylinux_2_28_aarch64"
+            PLATFORM_TAG="linux_aarch64"
         else
-            PLATFORM_TAG="manylinux_2_28_x86_64"
+            PLATFORM_TAG="linux_x86_64"
         fi
     fi
     
@@ -324,6 +333,32 @@ handle_existing_install() {
 # Download & Install
 # -----------------------------------------------------------------------------
 download_and_install() {
+    # If local wheel provided, use it directly
+    if [[ -n "$LOCAL_WHEEL" ]]; then
+        print_step "Installing from local wheel"
+        
+        if [[ ! -f "$LOCAL_WHEEL" ]]; then
+            print_error "Wheel file not found: $LOCAL_WHEEL"
+            exit 1
+        fi
+        
+        print_info "File: $LOCAL_WHEEL"
+        
+        # Uninstall previous version
+        if pip3 show reachable &> /dev/null; then
+            print_step "Removing previous installation"
+            pip3 uninstall reachable -y -q
+            print_ok "Previous version removed"
+        fi
+        
+        # Install
+        print_step "Installing REACHABLE"
+        pip3 install "$LOCAL_WHEEL" -q
+        print_ok "Installation complete"
+        return
+    fi
+    
+    # Remote install - download from GitHub
     print_step "Downloading wheel"
     
     DOWNLOAD_DIR=$(mktemp -d)
@@ -414,7 +449,7 @@ print_success() {
         echo ""
     fi
     echo -e "  ${BOLD}Future Upgrades:${NC}"
-    echo "    curl -sSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash -s -- --update"
+    echo "    git -C /path/to/reach-dist pull && ./install.sh --update"
     echo ""
     echo -e "  ${BOLD}Support:${NC} adazzi@sthenosec.com"
     echo ""
@@ -424,7 +459,9 @@ print_success() {
 # Main
 # -----------------------------------------------------------------------------
 main() {
-    if [[ "$UPDATE_MODE" == true ]]; then
+    if [[ -n "$LOCAL_WHEEL" ]]; then
+        print_header "REACHABLE Local Install"
+    elif [[ "$UPDATE_MODE" == true ]]; then
         print_header "REACHABLE Upgrade v${VERSION}"
     elif [[ "$CLEAN_DATA" == true ]]; then
         print_header "REACHABLE Clean Install v${VERSION}"
@@ -433,7 +470,12 @@ main() {
     fi
     
     detect_environment
-    setup_gh_cli
+    
+    # Only need GitHub CLI for remote installs
+    if [[ -z "$LOCAL_WHEEL" ]]; then
+        setup_gh_cli
+    fi
+    
     handle_existing_install
     download_and_install
     verify_installation
