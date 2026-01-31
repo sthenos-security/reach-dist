@@ -4,6 +4,43 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
+## [1.0.0-beta13] - 2026-01-31
+
+### Added
+- **DLP/PII Security Scanner**: Data Loss Prevention module with automatic PII detection
+  - Supports 25+ PII types: SSN, credit cards, API keys, passwords, health data, etc.
+  - Two-gate validation system reduces false positives by ~60%
+  - Gate 1: Path-based suppression (test files, fixtures, mocks, docs, examples)
+  - Gate 2: Token validation (Luhn check for credit cards, format validation for SSNs, etc.)
+  - Sanitizer detection: Identifies masked/redacted data patterns
+  - Integrated into dashboard with dedicated DLP panel
+- **AI Security Scanner**: OWASP LLM Top 10 detection (LLM01-LLM10)
+  - Prompt injection detection
+  - Insecure output handling
+  - Training data poisoning patterns
+  - Model DoS vulnerabilities
+  - Guard detection for protected AI endpoints
+
+### Fixed
+- **Trends chart totals**: DLP and AI findings now correctly included in scan history totals
+  - Fixed race condition where `complete_scan()` ran before DLP findings were stored
+  - Scans table now updated after DLP storage to include all signal types
+- **Dashboard data consistency**: Pipeline integrity check now validates all stages
+  - Raw → DB → Dashboard counts verified at scan completion
+
+### Changed
+- Dashboard summary now shows all 8 signal types:
+  - CVE Vulnerabilities, Malware (Static/Dynamic), Exposed Secrets
+  - Code Weaknesses (CWE), Config Issues, AI Security, DLP/PII
+- Noise reduction calculation includes DLP and AI filtered findings
+- Data integrity check added to scan completion output
+
+### Security
+- DLP findings include regulation mapping (GDPR, HIPAA, PCI-DSS, SOX, CCPA)
+- Severity auto-calculated based on PII type and exposure context
+
+---
+
 ## [1.0.0-beta10] - 2026-01-18
 
 ### Fixed

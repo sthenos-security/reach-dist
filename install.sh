@@ -38,8 +38,8 @@ set -e
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-VERSION="1.0.0b11"
-WHEEL_VERSION="1.0.0b11"
+VERSION="1.0.0b13"
+WHEEL_VERSION="1.0.0b13"
 REPO="sthenos-security/reach-dist"
 
 # -----------------------------------------------------------------------------
@@ -452,7 +452,9 @@ print_success() {
     echo -e "  ${BOLD}Future Upgrades:${NC}"
     echo "    cd /path/to/reach-dist && git pull && ./install.sh --update"
     echo ""
-    echo -e "  ${BOLD}Support:${NC} adazzi@sthenosec.com"
+    echo -e "  ${BOLD}Support:${NC}"
+    echo "    📧 Email: adazzi@sthenosec.com"
+    echo "    💬 Slack: https://sthenossecuri-yxh9464.slack.com/archives/C0AACF3JSEM"
     echo ""
 }
 
