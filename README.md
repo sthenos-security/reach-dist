@@ -142,6 +142,8 @@ cosign verify-blob \
 **Reachability** = call graph + import tracking to determine if a vulnerability is actually reachable through your code paths.
 **Dependency Scanning** = SBOM generation, CVE matching, and threat intelligence (CISA KEV, EPSS) — no call graph analysis.
 
+**Not yet supported:** Bazel, SBT, CMake, Meson, Buck, multi-repo/monorepo orchestration (Lerna, Nx, Turborepo).
+
 ## Requirements
 
 - Python 3.10–3.14
