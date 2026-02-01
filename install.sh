@@ -519,18 +519,25 @@ configure_path() {
 verify_installation() {
     print_header "Verification"
 
-    echo ""
-    echo -e "${BOLD}Version:${NC}"
-    "$VENV_BIN/reachctl" version 2>&1 | sed 's/^/  /'
-
+    # 1. Self-test: verify the wheel is functional
     echo ""
     echo -e "${BOLD}Self-test:${NC}"
     if "$VENV_BIN/reachctl" selftest 2>&1 | sed 's/^/  /'; then
         print_ok "All checks passed"
     else
-        print_warn "Some optional dependencies missing"
-        print_info "Run 'reachctl doctor' to install them"
+        print_warn "Some tests failed (non-fatal)"
     fi
+
+    # 2. Doctor: install missing external tools (syft, grype, guarddog, etc.)
+    echo ""
+    echo -e "${BOLD}Installing dependencies:${NC}"
+    "$VENV_BIN/reachctl" doctor 2>&1 | sed 's/^/  /'
+    print_ok "Dependency check complete"
+
+    # 3. Version: show final state with all tools installed
+    echo ""
+    echo -e "${BOLD}Version:${NC}"
+    "$VENV_BIN/reachctl" version 2>&1 | sed 's/^/  /'
 }
 
 # -----------------------------------------------------------------------------
@@ -562,7 +569,6 @@ print_success() {
     echo -e "  ${BOLD}Quick Start:${NC}"
     echo ""
     echo "    reachctl primer          # View quick-start guide"
-    echo "    reachctl doctor          # Check/install dependencies"
     echo "    reachctl scan /path      # Scan a repository"
     echo ""
     if [[ -n "$BACKUP_DIR" ]]; then
