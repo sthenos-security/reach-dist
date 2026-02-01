@@ -18,31 +18,59 @@ cd reach-dist
 ./install.sh
 ```
 
-Requires GitHub collaborator access. The installer handles authentication via `gh auth login`.
+Requires GitHub collaborator access. The installer creates an isolated virtual environment at `~/.reachable/venv` and handles all dependencies.
+
+## Setup
+
+Add REACHABLE to your PATH (the installer will prompt, or add manually):
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+export PATH="$HOME/.reachable/venv/bin:$PATH"
+source ~/.zshrc  # or ~/.bashrc
+```
+
+Set up a GitHub token for cloning vulnerable library source during reachability analysis:
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+export GITHUB_TOKEN="ghp_your_token_here"
+```
+
+Required scope: `repo` — create at https://github.com/settings/tokens
+
+Token priority (first found wins): `MCP_GITHUB_TOKEN` → `GITHUB_TOKEN` → `GH_TOKEN` → SSH key. If you have a working MCP GitHub token, REACHABLE will use it for cloning. Without any token, public repos work (rate-limited) but private repos will fail.
+
+Verify your git client and GitHub access:
+
+```bash
+reachctl doctor
+```
 
 ## Get Started
 
 ```bash
-reachctl primer
+reachctl primer              # Quick-start guide
+reachctl --help              # All commands
+reachctl scan --help         # Scan options
 ```
 
 ## Quick Scan
 
 ```bash
 reachctl scan /path/to/your/repo
+reachctl dashboard open      # View results
 ```
 
 ## Upgrade
 
 ```bash
-./install.sh --update       # Preserves data
-./install.sh --clean        # Fresh start (recommended during beta)
+./install.sh                 # Re-run to upgrade (uses --force-reinstall)
 ```
 
 ## Uninstall
 
 ```bash
-pip3 uninstall reachable
 rm -rf ~/.reachable
 ```
 
@@ -63,6 +91,7 @@ cosign verify-blob \
 
 - Python 3.10–3.14
 - macOS or Linux (x86_64 / ARM64)
+- git client
 
 ## Support
 
