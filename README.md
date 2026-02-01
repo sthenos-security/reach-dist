@@ -116,6 +116,32 @@ cosign verify-blob \
     reachable-*.whl
 ```
 
+## Language & Build System Support
+
+| Language | Reachability | Dependency Scanning | Build Systems |
+|----------|:---:|:---:|---|
+| Python | ✅ | ✅ | pip, Poetry, Pipenv |
+| JavaScript | ✅ | ✅ | npm, Yarn, pnpm |
+| TypeScript | ✅ | ✅ | npm, Yarn, pnpm |
+| Go | ✅ | ✅ | go mod |
+| Java | ✅ | ✅ | Maven, Gradle |
+| Kotlin | ✅ | ✅ | Gradle, Maven |
+| Scala | ✅ | ✅ | Gradle |
+| Groovy | ✅ | ✅ | Gradle |
+| Rust | — | ✅ | Cargo |
+| Ruby | — | ✅ | Bundler |
+| C/C++ | — | — | — |
+| C#/.NET | — | — | NuGet |
+| PHP | — | — | Composer |
+| Swift/Obj-C | — | — | CocoaPods, SPM |
+| Dart/Flutter | — | — | pub |
+| Elixir/Erlang | — | — | Mix/Hex |
+
+✅ = supported, — = not yet supported
+
+**Reachability** = call graph + import tracking to determine if a vulnerability is actually reachable through your code paths.
+**Dependency Scanning** = SBOM generation, CVE matching, and threat intelligence (CISA KEV, EPSS) — no call graph analysis.
+
 ## Requirements
 
 - Python 3.10–3.14
