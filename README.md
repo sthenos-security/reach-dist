@@ -12,13 +12,42 @@ The interactive dashboard shows scan results across six tabs: Risk & Posture, Re
 
 ## Install
 
+This is a **private repository**. All options require GitHub access with `repo` scope.
+Create a Personal Access Token (Classic) at https://github.com/settings/tokens with `repo` scope enabled.
+
+### Option 1: Clone and run
+
 ```bash
 git clone https://github.com/sthenos-security/reach-dist.git
 cd reach-dist
 ./install.sh
 ```
 
-Requires GitHub collaborator access. The installer creates an isolated virtual environment at `~/.reachable/venv` and handles all dependencies.
+Uses your existing git credentials (SSH key or credential helper).
+
+### Option 2: curl with token (no clone needed)
+
+```bash
+export GITHUB_TOKEN="ghp_your_token_here"
+curl -H "Authorization: token $GITHUB_TOKEN" \
+     -H "Accept: application/vnd.github.v3.raw" \
+     -sL https://api.github.com/repos/sthenos-security/reach-dist/contents/install.sh | bash
+```
+
+The `GITHUB_TOKEN` here authenticates to the GitHub API to download `install.sh` from this private repo. It also needs `repo` scope so the installer can download wheels.
+
+### Option 3: Local wheel install
+
+Download `install.sh` and a wheel manually (e.g. from the GitHub web UI), then:
+
+```bash
+chmod +x install.sh
+./install.sh --wheel ./wheels/v1.0.0b13/reachable-1.0.0b13-cp314-cp314-macosx_10_15_universal2.whl
+```
+
+No token needed if you already have the files.
+
+The installer creates an isolated virtual environment at `~/.reachable/venv` and handles all dependencies.
 
 ## Setup
 
