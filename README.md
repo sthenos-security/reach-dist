@@ -38,6 +38,19 @@ pip3 uninstall reachable
 rm -rf ~/.reachable
 ```
 
+## Verify Signatures
+
+All wheels are signed with [Sigstore](https://sigstore.dev) cosign. See [VERIFICATION.md](VERIFICATION.md) for details.
+
+```bash
+brew install cosign
+cosign verify-blob \
+    --bundle reachable-*.whl.cosign.bundle \
+    --certificate-identity-regexp="https://github.com/sthenos-security/reach-core/.*" \
+    --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+    reachable-*.whl
+```
+
 ## Requirements
 
 - Python 3.10–3.14
