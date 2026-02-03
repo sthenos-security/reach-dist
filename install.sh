@@ -26,7 +26,7 @@
 #      -sL https://api.github.com/repos/sthenos-security/reach-dist/contents/install.sh | bash
 #
 #    # Option 3: Local wheel install (download both files first)
-#    ./install.sh --wheel ./wheels/latest/reachable-1.0.0b13-cp311-*.whl
+#    ./install.sh --wheel ./wheels/latest/reachable-1.0.0b14-cp311-*.whl
 #
 #  Other options:
 #    ./install.sh --update    # Upgrade with backup
@@ -40,8 +40,8 @@ set -e
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-VERSION="1.0.0b13"
-WHEEL_VERSION="1.0.0b13"
+VERSION="1.0.0b14"
+WHEEL_VERSION="1.0.0b14"
 REPO="sthenos-security/reach-dist"
 VENV_DIR="$HOME/.reachable/venv"
 VENV_BIN="$VENV_DIR/bin"

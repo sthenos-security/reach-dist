@@ -4,6 +4,33 @@ All notable changes to REACHABLE are documented here.
 
 ---
 
+## [1.0.0-beta14] - 2026-02-02
+
+### Fixed
+- **DLP false positives**: Word-boundary regex in `sources.py` — `pan` no longer matches `span`, `company`, `expand`; `name` no longer matches `serviceName`, `filename`
+- **Credential file false positives**: `.npmrc`, `.pypirc`, `.yarnrc` now content-aware — only flags files with actual credentials (`_authToken`, `password=`), not config-only files
+- **Template variable false positives**: `${{ secrets.GITHUB_TOKEN }}`, `${{ steps.X.outputs.token }}`, `${VAR_NAME}` no longer flagged as hardcoded secrets
+- **CI workflow false positives**: Job names like `secrets:` and commands like `detect-secrets scan` no longer trigger generic_secret detection
+- **MCP error logging**: Fixed f-string bug in `mcp_github.py` — error messages now show actual errors instead of literal `{error_str}`
+- **Library tag matching**: Semver-aware matching in `lib_manager.py` — `4.5.3` can no longer fuzzy-match to `v4.0.3` (requires exact major.minor)
+- **Colima sandbox messaging**: Fixed contradictory "Colima running" + "Docker not running" messages
+  - `_check_colima_status()` now verifies Docker daemon accessibility, not just Colima process existence
+  - New status `docker_not_ready` with clear fix instructions (`colima stop && colima start`)
+- **Dashboard Unknown display**: Fixed "unknown Unknown" literal — now shows `❓ Unknown (review)` properly
+
+### Changed
+- **Primer documentation**: Expanded dynamic malware sandbox section for macOS users
+  - Clear setup instructions: `reachctl sandbox --init` or manual `brew install colima docker && colima start`
+  - Management commands: `--init`, `--remove`, status check
+  - Troubleshooting section for common issues
+  - Clarified that static malware analysis (GuardDog) always runs; sandbox is optional but recommended
+
+### Documentation
+- Updated all version references from b13 to b14
+- `reachctl primer` now includes complete Colima setup and troubleshooting guide
+
+---
+
 ## [1.0.0-beta13] - 2026-01-31
 
 ### Added

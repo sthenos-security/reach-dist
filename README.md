@@ -42,7 +42,7 @@ Download `install.sh` and a wheel manually (e.g. from the GitHub web UI), then:
 
 ```bash
 chmod +x install.sh
-./install.sh --wheel ./wheels/v1.0.0b13/reachable-1.0.0b13-cp314-cp314-macosx_10_15_universal2.whl
+./install.sh --wheel ./wheels/v1.0.0b14/reachable-1.0.0b14-cp314-cp314-macosx_10_15_universal2.whl
 ```
 
 No token needed if you already have the files.
