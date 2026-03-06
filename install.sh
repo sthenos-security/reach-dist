@@ -340,15 +340,13 @@ download_and_install() {
     CHECKSUM_URL="https://raw.githubusercontent.com/${REPO}/main/wheels/v${VERSION}/checksums.sha256"
     if curl -fsSL "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
         if grep -q "$WHEEL_FILE" checksums.sha256; then
+            EXPECTED=$(grep "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
             if command -v sha256sum &>/dev/null; then
-                SHA_CHECK=$(grep "$WHEEL_FILE" checksums.sha256 | sha256sum --check --status 2>/dev/null && echo ok || echo fail)
+                ACTUAL=$(sha256sum "$WHEEL_FILE" | awk '{print $1}')
             else
-                # macOS
-                EXPECTED=$(grep "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
                 ACTUAL=$(shasum -a 256 "$WHEEL_FILE" | awk '{print $1}')
-                [[ "$EXPECTED" == "$ACTUAL" ]] && SHA_CHECK=ok || SHA_CHECK=fail
             fi
-            if [[ "$SHA_CHECK" == "ok" ]]; then
+            if [[ "$EXPECTED" == "$ACTUAL" ]]; then
                 print_ok "SHA-256 checksum verified"
             else
                 print_error "SHA-256 checksum FAILED — aborting"
