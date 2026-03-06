@@ -2,6 +2,17 @@
 
 ---
 
+## [1.0.0b17]
+
+- Release integrity: SHA-256 checksum and Sigstore/cosign signature verification on every install
+- Installer: `doctor` now runs before `selftest` during installation
+- `reachctl version`: removed tool status (belongs in `reachctl doctor`)
+- `reachctl selftest`: accurate tool paths shown, managed tools only resolved from `~/.reachable`
+- `reachctl pipeline init`: fixed session ID capture in CI (output via `print()`, `--json` flag)
+- CI/CD templates: fixed serial scan session ID parsing
+
+---
+
 ## [1.0.0b16]
 
 - Dashboard improvements: new tabs, improved rendering, badge fixes

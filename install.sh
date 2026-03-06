@@ -334,21 +334,69 @@ download_and_install() {
     fi
     
     print_ok "Downloaded successfully"
-    
+
+    # ── SHA-256 checksum verification ────────────────────────────────────────
+    print_step "Verifying integrity"
+    CHECKSUM_URL="https://raw.githubusercontent.com/${REPO}/main/wheels/v${VERSION}/checksums.sha256"
+    if curl -fsSL "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
+        if grep -q "$WHEEL_FILE" checksums.sha256; then
+            if command -v sha256sum &>/dev/null; then
+                SHA_CHECK=$(grep "$WHEEL_FILE" checksums.sha256 | sha256sum --check --status 2>/dev/null && echo ok || echo fail)
+            else
+                # macOS
+                EXPECTED=$(grep "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
+                ACTUAL=$(shasum -a 256 "$WHEEL_FILE" | awk '{print $1}')
+                [[ "$EXPECTED" == "$ACTUAL" ]] && SHA_CHECK=ok || SHA_CHECK=fail
+            fi
+            if [[ "$SHA_CHECK" == "ok" ]]; then
+                print_ok "SHA-256 checksum verified"
+            else
+                print_error "SHA-256 checksum FAILED — aborting"
+                exit 1
+            fi
+        else
+            print_warn "Checksum entry not found — skipping SHA-256 check"
+        fi
+    else
+        print_warn "Could not fetch checksums — skipping SHA-256 check"
+    fi
+
+    # ── Cosign signature verification (optional, skipped if cosign not installed) ──
+    COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
+    BUNDLE_URL="https://raw.githubusercontent.com/${REPO}/main/wheels/v${VERSION}/${COSIGN_BUNDLE}"
+    if command -v cosign &>/dev/null; then
+        if curl -fsSL "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
+            if cosign verify-blob \
+                --bundle "$COSIGN_BUNDLE" \
+                --certificate-identity-regexp "https://github.com/sthenos-security/" \
+                --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+                "$WHEEL_FILE" &>/dev/null; then
+                print_ok "Cosign signature verified (Sigstore)"
+            else
+                print_error "Cosign signature verification FAILED — aborting"
+                exit 1
+            fi
+        else
+            print_warn "Could not fetch cosign bundle — skipping signature check"
+        fi
+    else
+        print_info "cosign not installed — skipping signature check (SHA-256 verified)"
+    fi
+
     # Uninstall previous version
     if pip3 show reachable &> /dev/null; then
         print_step "Removing previous installation"
         pip3 uninstall reachable -y -q 2>/dev/null || true
         print_ok "Previous version removed"
     fi
-    
+
     # Install into venv
     print_step "Installing REACHABLE v$VERSION"
     python3 -m venv "$HOME/.reachable/venv"
     "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
     "$HOME/.reachable/venv/bin/pip" install "$WHEEL_FILE" -q
     print_ok "Installation complete"
-    
+
     # Cleanup
     rm -rf "$DOWNLOAD_DIR"
 }
@@ -360,6 +408,10 @@ verify_installation() {
     print_header "Verification"
     
     VENV_REACHCTL="$HOME/.reachable/venv/bin/reachctl"
+
+    echo ""
+    echo -e "${BOLD}Doctor:${NC}"
+    "$VENV_REACHCTL" doctor --full 2>&1 | sed 's/^/  /'
 
     echo ""
     echo -e "${BOLD}Self-test:${NC}"

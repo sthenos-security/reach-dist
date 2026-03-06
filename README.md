@@ -107,6 +107,18 @@ reachctl scan /path/to/your/repo
 
 That's it. REACHABLE will scan your repository and open an interactive dashboard with the results.
 
+### 4. Set Up Authentication (Recommended)
+
+For full scan capability, store your GitHub and MCP tokens securely in the system keychain — do not set them as environment variables:
+
+```bash
+reachctl auth login
+```
+
+This prompts for your GitHub token and MCP token and stores them securely. Tokens set this way take precedence over environment variables and are never exposed in shell history or process listings.
+
+See `reachctl primer` for token scopes, CI/CD setup, and advanced auth options.
+
 ### What's Next
 
 ```bash
@@ -118,7 +130,7 @@ reachctl --help       # Quick command overview
 
 ## CI/CD Integration
 
-Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins are included in `cicd-templates/`:
+Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins are included in [`cicd-templates/`](cicd-templates/):
 
 ```
 cicd-templates/
@@ -142,20 +154,12 @@ REACHABLE stores data in `~/.reachable/`:
 └── config/    # Configuration files
 ```
 
-### Backup
-
-```bash
-cp -r ~/.reachable ~/.reachable.backup
-```
-
-The `--update` flag does this automatically before upgrading.
-
 ---
 
 ## Uninstall
 
 ```bash
-pip uninstall reachable
+~/.reachable/venv/bin/pip uninstall reachable
 rm -rf ~/.reachable
 ```
 
