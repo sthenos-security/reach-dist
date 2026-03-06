@@ -33,13 +33,38 @@ set -e
 # -----------------------------------------------------------------------------
 REPO="sthenos-security/reach-dist"
 
-# Resolve latest version from reach-dist GitHub releases API
+# Resolve latest version from reach-dist GitHub releases API.
+# Uses GITHUB_TOKEN if set (avoids rate limits in CI).
+# Unauthenticated limit: 60 req/hr per IP. Authenticated: 5000 req/hr.
 resolve_version() {
+    local api_url="https://api.github.com/repos/${REPO}/releases"
     local response
-    response=$(curl -sL "https://api.github.com/repos/${REPO}/releases")
+
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        response=$(curl -sL -H "Authorization: Bearer ${GITHUB_TOKEN}" "$api_url")
+    else
+        response=$(curl -sL "$api_url")
+    fi
+
     echo "$response" | python3 -c "
-import sys, json
+import sys, json, os
 data = json.load(sys.stdin)
+if isinstance(data, dict):
+    msg = data.get('message', 'unknown error')
+    has_token = bool(os.environ.get('GITHUB_TOKEN',''))
+    if 'rate limit' in msg.lower():
+        if has_token:
+            sys.stderr.write('Error: GitHub API rate limit exceeded even with GITHUB_TOKEN.\n')
+            sys.stderr.write('  Your token may be invalid or scoped incorrectly.\n')
+        else:
+            sys.stderr.write('Error: GitHub API rate limit exceeded (unauthenticated).\n')
+            sys.stderr.write('  Fix option 1 — set a token and retry:\n')
+            sys.stderr.write('    export GITHUB_TOKEN=\"your_token\"\n')
+            sys.stderr.write('    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash\n')
+            sys.stderr.write('  Fix option 2 — wait ~1 hour for the rate limit to reset, then retry.\n')
+    else:
+        sys.stderr.write('Error resolving latest version: GitHub API: ' + msg + '\n')
+    sys.exit(1)
 if not isinstance(data, list) or not data:
     sys.stderr.write('Error resolving latest version: no releases found\n')
     sys.exit(1)
@@ -48,7 +73,7 @@ if not tag:
     sys.stderr.write('Error resolving latest version: missing tag_name\n')
     sys.exit(1)
 print(tag.lstrip('v'))
-"
+" GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 }
 
 VERSION=""
