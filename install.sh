@@ -301,9 +301,11 @@ download_and_install() {
             print_ok "Previous version removed"
         fi
         
-        # Install
+        # Install into venv
         print_step "Installing REACHABLE"
-        pip3 install --user "$LOCAL_WHEEL" -q
+        python3 -m venv "$HOME/.reachable/venv"
+        "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
+        "$HOME/.reachable/venv/bin/pip" install "$LOCAL_WHEEL" -q
         print_ok "Installation complete"
         return
     fi
@@ -340,9 +342,11 @@ download_and_install() {
         print_ok "Previous version removed"
     fi
     
-    # Install
+    # Install into venv
     print_step "Installing REACHABLE v$VERSION"
-    pip3 install --user "$WHEEL_FILE" -q
+    python3 -m venv "$HOME/.reachable/venv"
+    "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
+    "$HOME/.reachable/venv/bin/pip" install "$WHEEL_FILE" -q
     print_ok "Installation complete"
     
     # Cleanup
@@ -356,12 +360,13 @@ verify_installation() {
     print_header "Verification"
     
     echo ""
+    VENV_REACHCTL="$HOME/.reachable/venv/bin/reachctl"
     echo -e "${BOLD}Version:${NC}"
-    reachctl version 2>&1 | sed 's/^/  /'
+    "$VENV_REACHCTL" version 2>&1 | sed 's/^/  /'
     
     echo ""
     echo -e "${BOLD}Self-test:${NC}"
-    if reachctl selftest 2>&1 | sed 's/^/  /'; then
+    if "$VENV_REACHCTL" selftest 2>&1 | sed 's/^/  /'; then
         print_ok "All checks passed"
     else
         print_warn "Some optional dependencies missing"
@@ -390,6 +395,10 @@ print_success() {
     echo "    reachctl doctor          # Check/install dependencies"
     echo "    reachctl scan /path      # Scan a repository"
     echo ""
+    echo -e "  ${BOLD}Add to PATH:${NC}"
+    echo "    export PATH=\"\$HOME/.reachable/venv/bin:\$PATH\""
+    echo "    # Add to ~/.zshrc or ~/.bashrc to make permanent"
+    echo ""
     if [[ -n "$BACKUP_DIR" ]]; then
         echo -e "  ${BOLD}Note:${NC} Previous data backed up to:"
         echo "    $BACKUP_DIR"
@@ -417,8 +426,6 @@ main() {
     fi
     
     detect_environment
-    
-    
     handle_existing_install
     download_and_install
     verify_installation
