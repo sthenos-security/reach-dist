@@ -97,43 +97,7 @@ To make it permanent, add the line above to your `~/.zshrc` or `~/.bashrc`, then
 reachctl doctor
 ```
 
-This installs the scanning tools (Syft, Grype, GuardDog, Semgrep). Run it once after installation. Example output on a healthy system:
-
-```
-REACHABLE SYSTEM CHECK
-[1/4] System Resources
-   OS:      Darwin arm64
-   RAM:     16.0GB total, 8.0GB available
-   Disk:    66.9GB free (/Users/username/.ollama)
-   GPU:     Apple Silicon (Metal) (16.0GB)
-   Ollama:  installed (not running)
-[2/4] Required Tools
- Preflight check...
-   git 2.50.1
-   Python 3.14
-   syft 1.42.1
-   grype 0.109.0
-   semgrep 1.154.0
-   guarddog 2.4.0
-   joern (Java 17)
-   grype vulnerability DB
- Preflight passed
- All tools ready
-[3/4] Git
-   ✓ git version 2.50.1 (Apple Git-155)
-   Credentials: reachctl auth status
-[4/4] Optional Enhancements
-   trufflehog 3.93.6 — active secret verification available
-   joern 4.0.490 (Java 17)
-   ollama — installed (not running)
-
-  Credentials
-   GitHub Token           ○ SSH works, no API token
-   GitHub MCP Token       ✓ valid (env:MCP_GITHUB_TOKEN)
-   Anthropic API Key      ✓ valid (keychain)
-   Groq API Key           ✓ valid (keychain)
- Doctor complete
-```
+This installs the scanning tools (Syft, Grype, GuardDog, Semgrep). Run it once after installation. See [DOCTOR.md](DOCTOR.md) for sample output.
 
 ### 3. Run a Scan
 
