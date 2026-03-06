@@ -1,39 +1,44 @@
-# REACHABLE Security Scan — Serial (GitHub Actions)
-#
-# Copy this file to .github/workflows/reachable-scan.yml in your repo.
+# REACHABLE Security Scan — Serial (GitHub-Managed Runners)
 #
 # Runs all pipeline steps sequentially on a single GitHub-hosted runner.
-# No artifact passing — session state lives on the runner filesystem.
+# Session state lives on the runner's local filesystem.
 #
-# No secrets required — wheels are downloaded from the public reach-dist repo.
-# Pin REACHABLE_VERSION for reproducible builds; leave empty for latest.
+# ── Repo variables (all optional) ────────────────────────────────────
+#   REACHABLE_DIST_REPO  — dist repo (default: sthenos-security/reach-dist)
+#   REACHABLE_VERSION    — pin a version (default: latest)
+#   FAIL_THRESHOLD       — critical | high | medium | any | none (default: high)
+#   REACHABLE_GATE_ACTOR — restrict manual triggers to this actor (default: open)
 
-name: REACHABLE Security Scan
+name: REACHABLE Serial Scan
 
 on:
-  push:
-    branches: [main, master, develop]
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
-  schedule:
-    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
 
 env:
-  REACHABLE_VERSION: ""  # Leave empty for latest, or pin: "1.0.0b16"
-  REACHABLE_DIST_REPO: "sthenos-security/reach-dist"
-  FAIL_THRESHOLD: "high"  # critical | high | medium | any | none
+  REACHABLE_DIST_REPO: ${{ vars.REACHABLE_DIST_REPO || 'sthenos-security/reach-dist' }}
+  REACHABLE_VERSION: ${{ vars.REACHABLE_VERSION || '' }}
+  FAIL_THRESHOLD: ${{ vars.FAIL_THRESHOLD || 'high' }}
 
 jobs:
   scan:
     name: REACHABLE Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Gate — Check authorized actor
+        if: github.event_name == 'workflow_dispatch' && vars.REACHABLE_GATE_ACTOR != ''
+        run: |
+          if [[ "${{ github.actor }}" != "${{ vars.REACHABLE_GATE_ACTOR }}" ]]; then
+            echo "❌ Not authorized: ${{ github.actor }}"
+            exit 1
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -46,26 +51,17 @@ jobs:
 
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -sL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/releases/latest" \
-              | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
-            echo "Resolved latest: ${VERSION}"
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://github.com/${{ env.REACHABLE_DIST_REPO }}/releases/download/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
 
       - name: Initialize Pipeline
         run: |
           JSON=$(reachctl pipeline init . --json 2>/dev/null | grep '^{' | tail -1)
           echo "$JSON"
           SESSION_DIR=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_dir'])")
-          [[ -z "$SESSION_DIR" ]] && { echo "::error::Could not parse session directory"; exit 1; }
+          [[ -z "$SESSION_DIR" ]] && { echo "::error::Could not parse session_dir from JSON"; exit 1; }
           echo "SESSION_DIR=${SESSION_DIR}" >> "$GITHUB_ENV"
-          echo "::notice::Directory: ${SESSION_DIR}"
 
       - name: Scan — SBOM + Vulnerabilities
         run: reachctl pipeline step scan --session "$SESSION_DIR"
@@ -76,7 +72,7 @@ jobs:
       - name: Malware
         run: reachctl pipeline step malware --session "$SESSION_DIR"
 
-      - name: Package Health
+      - name: Health
         run: reachctl pipeline step health --session "$SESSION_DIR"
 
       - name: IaC
@@ -88,7 +84,7 @@ jobs:
       - name: DLP/PII
         run: reachctl pipeline step dlp --session "$SESSION_DIR"
 
-      - name: Finalize — Reachability + Dashboard
+      - name: Finalize — Reachability Analysis + Dashboard
         id: finalize
         continue-on-error: true
         run: |
@@ -108,15 +104,8 @@ jobs:
           path: ~/.reachable/scans/**/dashboard/
           retention-days: 30
 
-      - name: Export SARIF
+      - name: Upload SARIF
         if: always()
-        run: |
-          reachctl export --repo . --format sarif \
-            --repo-uri https://github.com/${{ github.repository }} \
-            --output /tmp/reachable.sarif || true
-
-      - name: Upload SARIF Artifact
-        if: always() && hashFiles('/tmp/reachable.sarif') != ''
         uses: actions/upload-artifact@v4
         with:
           name: sarif-report
@@ -138,17 +127,12 @@ jobs:
           case "$EXIT" in
             0) STATUS="✅ Clean" ;;
             2) STATUS="⚠️ Findings above threshold (${{ env.FAIL_THRESHOLD }})" ;;
-            *) STATUS="❌ Error (exit ${EXIT})" ;;
+            *) STATUS="❌ Scan error (exit ${EXIT})" ;;
           esac
           {
             echo "## 🔒 REACHABLE Security Scan"
             echo "**Status:** ${STATUS} | **Session:** ${SESSION_DIR}"
-            echo ""
-            echo "Scanners: CVE · Secrets+CWE · Malware · Health · IaC · AI/LLM · DLP/PII"
-            echo "| Artifact | Location |"
-            echo "|----------|----------|"
-            echo "| 📊 Dashboard | Actions → Artifacts → \`security-dashboard\` |"
-            echo "| 📋 SARIF | Security → Code scanning alerts |"
+            echo "Scanners: CVE · Secrets/CWE · Malware · Health · IaC · AI/LLM · DLP/PII"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce Threshold

@@ -1,44 +1,50 @@
-# REACHABLE Distributed Security Scan (GitHub Actions)
+# REACHABLE Security Scan — GitHub Managed Runners, Distributed via S3
 #
-# Copy this file to .github/workflows/reachable-scan.yml in your repo.
+# Runs scanner steps in parallel across ephemeral managed runners.
+# S3 is the shared state layer — each job syncs only its own raw JSON.
 #
-# Runs security analysis in parallel across multiple runners.
-# State is shared between jobs via GitHub Artifacts.
+# ── AWS authentication — OIDC (recommended) ───────────────────────────
+#   1. Create IAM OIDC provider: https://token.actions.githubusercontent.com
+#   2. Create IAM role with trust policy for this repo
+#   3. Attach S3 policy: GetObject, PutObject, DeleteObject, ListBucket
+#   4. Set repo variables: REACH_AWS_ROLE_ARN, REACH_S3_BUCKET, REACH_S3_REGION
 #
-# Step dependencies:
-#   init ──────────┬── scan ──┬── malware
-#                  │          └── health
-#                  ├── secrets
-#                  ├── iac
-#                  ├── ai
-#                  └── dlp
-#   all ───────────── finalize
-#
-# No secrets required — wheels are downloaded from the public reach-dist repo.
-# Pin REACHABLE_VERSION for reproducible builds; leave empty for latest.
+# ── Repo variables (all optional except AWS ones) ─────────────────────
+#   REACHABLE_DIST_REPO  — dist repo (default: sthenos-security/reach-dist)
+#   REACHABLE_VERSION    — pin a version (default: latest)
+#   FAIL_THRESHOLD       — critical | high | medium | any | none (default: high)
+#   REACH_AWS_ROLE_ARN   — IAM role ARN for OIDC
+#   REACH_S3_BUCKET      — S3 bucket name
+#   REACH_S3_REGION      — S3 region (default: us-east-1)
 
-name: REACHABLE Distributed Scan
+name: REACHABLE Managed Distributed Scan (S3)
 
 on:
-  push:
-    branches: [main, master, develop]
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
-  schedule:
-    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
 
 env:
-  REACHABLE_VERSION: ""  # Leave empty for latest, or pin: "1.0.0b16"
-  REACHABLE_DIST_REPO: "sthenos-security/reach-dist"
-  FAIL_THRESHOLD: "high"  # critical | high | medium | any | none
+  REACHABLE_DIST_REPO: ${{ vars.REACHABLE_DIST_REPO || 'sthenos-security/reach-dist' }}
+  REACHABLE_VERSION: ${{ vars.REACHABLE_VERSION || '' }}
+  FAIL_THRESHOLD: ${{ vars.FAIL_THRESHOLD || 'high' }}
+  S3_BUCKET: ${{ vars.REACH_S3_BUCKET }}
+  S3_REGION: ${{ vars.REACH_S3_REGION || 'us-east-1' }}
+  AWS_ROLE_ARN: ${{ vars.REACH_AWS_ROLE_ARN }}
 
 jobs:
+  # ============================================================================
+  # INIT
+  # ============================================================================
   init:
     name: Initialize Pipeline
     runs-on: ubuntu-latest
     outputs:
-      session_id: ${{ steps.init.outputs.session_id }}
+      session_dir: ${{ steps.init.outputs.session_dir }}
+      s3_prefix: ${{ steps.init.outputs.s3_prefix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,31 +52,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
       - name: Initialize Pipeline
         id: init
         run: |
-          OUTPUT=$(reachctl pipeline init . 2>&1)
-          echo "$OUTPUT"
-          SESSION_ID=$(echo "$OUTPUT" | grep -oE '[0-9]{8}-[0-9]{6}-[a-z0-9]+' | head -1)
-          [[ -z "$SESSION_ID" ]] && { echo "::error::Could not parse session_id"; exit 1; }
-          echo "session_id=${SESSION_ID}" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: session-init
-          path: ~/.reachable/scans/
-          retention-days: 1
+          JSON=$(reachctl pipeline init . --json 2>/dev/null | grep '^{' | tail -1)
+          echo "$JSON"
+          SESSION_DIR=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_dir'])")
+          SESSION_ID=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])")
+          REPO_SLUG=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['repo_name'])")
+          [[ -z "$SESSION_DIR" ]] && { echo "::error::Could not parse session_dir from JSON"; exit 1; }
+          S3_PREFIX="${REPO_SLUG}/${SESSION_ID}"
+          echo "session_dir=${SESSION_DIR}" >> "$GITHUB_OUTPUT"
+          echo "s3_prefix=${S3_PREFIX}" >> "$GITHUB_OUTPUT"
+      - name: Push initial state to S3
+        run: |
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ steps.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/.pipeline-state.json" --include "**/*.db" \
+            --region "${{ env.S3_REGION }}"
 
+  # ============================================================================
+  # SCAN
+  # ============================================================================
   scan:
     name: SBOM + Vulnerabilities
     needs: init
@@ -86,27 +99,35 @@ jobs:
           path: ~/.cache/grype
           key: grype-db-${{ runner.os }}-${{ hashFiles('**/requirements*.txt', '**/go.sum', '**/package-lock.json') }}
           restore-keys: grype-db-${{ runner.os }}-
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
-        with:
-          name: session-init
-          path: ~/.reachable/scans/
-      - run: reachctl pipeline step scan --session ${{ needs.init.outputs.session_id }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: step-scan
-          path: ~/.reachable/scans/
-          retention-days: 1
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull state from S3
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --region "${{ env.S3_REGION }}"
+      - name: Run
+        run: reachctl pipeline step scan --session "${{ needs.init.outputs.session_dir }}"
+      - name: Push outputs to S3
+        run: |
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/.pipeline-state.json" --include "**/.step-scan.json" \
+            --include "**/*.db" --include "**/raw/grype-vulns.json" \
+            --region "${{ env.S3_REGION }}"
+
+  # ============================================================================
+  # PARALLEL STEPS
+  # secrets, iac, ai, dlp → need init only
+  # malware, health        → need scan (SBOM in repo.db)
+  # ============================================================================
 
   secrets:
     name: Secrets + CWE
@@ -117,27 +138,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
-        with:
-          name: session-init
-          path: ~/.reachable/scans/
-      - run: reachctl pipeline step secrets --session ${{ needs.init.outputs.session_id }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: step-secrets
-          path: ~/.reachable/scans/
-          retention-days: 1
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull, run, push
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --exclude "*" --include "**/.pipeline-state.json" --include "**/*.db" \
+            --region "${{ env.S3_REGION }}"
+          reachctl pipeline step secrets --session "${{ needs.init.outputs.session_dir }}"
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/raw/security-findings.json" --include "**/.step-secrets.json" \
+            --region "${{ env.S3_REGION }}"
 
   malware:
     name: Malware Detection
@@ -148,27 +168,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
-        with:
-          name: step-scan
-          path: ~/.reachable/scans/
-      - run: reachctl pipeline step malware --session ${{ needs.init.outputs.session_id }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: step-malware
-          path: ~/.reachable/scans/
-          retention-days: 1
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull, run, push
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --region "${{ env.S3_REGION }}"
+          reachctl pipeline step malware --session "${{ needs.init.outputs.session_dir }}"
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/raw/malware.json" --include "**/.step-malware.json" \
+            --region "${{ env.S3_REGION }}"
 
   health:
     name: Package Health
@@ -179,27 +197,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
-        with:
-          name: step-scan
-          path: ~/.reachable/scans/
-      - run: reachctl pipeline step health --session ${{ needs.init.outputs.session_id }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: step-health
-          path: ~/.reachable/scans/
-          retention-days: 1
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull, run, push
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --region "${{ env.S3_REGION }}"
+          reachctl pipeline step health --session "${{ needs.init.outputs.session_dir }}"
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/raw/health.json" --include "**/.step-health.json" \
+            --region "${{ env.S3_REGION }}"
 
   iac:
     name: IaC Scan
@@ -210,27 +226,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
-        with:
-          name: session-init
-          path: ~/.reachable/scans/
-      - run: reachctl pipeline step iac --session ${{ needs.init.outputs.session_id }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: step-iac
-          path: ~/.reachable/scans/
-          retention-days: 1
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull, run, push
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --exclude "*" --include "**/.pipeline-state.json" --include "**/*.db" \
+            --region "${{ env.S3_REGION }}"
+          reachctl pipeline step iac --session "${{ needs.init.outputs.session_dir }}"
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/raw/iac.json" --include "**/.step-iac.json" \
+            --region "${{ env.S3_REGION }}"
 
   ai:
     name: AI/LLM Security
@@ -241,27 +256,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
-        with:
-          name: session-init
-          path: ~/.reachable/scans/
-      - run: reachctl pipeline step ai --session ${{ needs.init.outputs.session_id }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: step-ai
-          path: ~/.reachable/scans/
-          retention-days: 1
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull, run, push
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --exclude "*" --include "**/.pipeline-state.json" --include "**/*.db" \
+            --region "${{ env.S3_REGION }}"
+          reachctl pipeline step ai --session "${{ needs.init.outputs.session_dir }}"
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/raw/ai-security.json" --include "**/.step-ai.json" \
+            --region "${{ env.S3_REGION }}"
 
   dlp:
     name: DLP/PII Scan
@@ -272,28 +286,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@v4
-        with:
-          name: session-init
-          path: ~/.reachable/scans/
-      - run: reachctl pipeline step dlp --session ${{ needs.init.outputs.session_id }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: step-dlp
-          path: ~/.reachable/scans/
-          retention-days: 1
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull, run, push
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --exclude "*" --include "**/.pipeline-state.json" --include "**/*.db" \
+            --region "${{ env.S3_REGION }}"
+          reachctl pipeline step dlp --session "${{ needs.init.outputs.session_dir }}"
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/raw/dlp-security.json" --include "**/.step-dlp.json" \
+            --region "${{ env.S3_REGION }}"
 
+  # ============================================================================
+  # FINALIZE
+  # ============================================================================
   finalize:
     name: Finalize + Dashboard
     needs: [init, scan, secrets, malware, health, iac, ai, dlp]
@@ -303,47 +319,39 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Cache Grype DB
-        uses: actions/cache@v4
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          path: ~/.cache/grype
-          key: grype-db-${{ runner.os }}-${{ hashFiles('**/requirements*.txt', '**/go.sum', '**/package-lock.json') }}
-          restore-keys: grype-db-${{ runner.os }}-
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.S3_REGION }}
       - name: Install REACHABLE
         run: |
-          VERSION="${{ env.REACHABLE_VERSION }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
-          fi
-          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
-          pip install "/tmp/${WHEEL}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Download All Step Results
-        uses: actions/download-artifact@v4
-        with:
-          path: ~/.reachable/scans/
-          pattern: step-*
-          merge-multiple: true
-      - name: Download Session State
-        uses: actions/download-artifact@v4
-        with:
-          name: session-init
-          path: ~/.reachable/scans/
-      - name: Finalize — Reachability + Correlation + Dashboard
+          ARGS=""
+          [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+      - name: Pull complete state from S3
+        run: |
+          aws s3 sync "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            ~/.reachable/scans/ --region "${{ env.S3_REGION }}"
+      - name: Finalize
         id: finalize
         continue-on-error: true
         run: |
           set +e
-          reachctl pipeline finalize \
-            --session ${{ needs.init.outputs.session_id }} \
-            --fail-on ${{ env.FAIL_THRESHOLD }}
+          reachctl pipeline finalize --session "${{ needs.init.outputs.session_dir }}" --fail-on "${{ env.FAIL_THRESHOLD }}"
           FINALIZE_EXIT=$?
-          echo "finalize_exit=${FINALIZE_EXIT}" >> $GITHUB_OUTPUT
+          echo "finalize_exit=${FINALIZE_EXIT}" >> "$GITHUB_OUTPUT"
           [[ $FINALIZE_EXIT -eq 2 ]] && echo "::warning::Findings above threshold '${{ env.FAIL_THRESHOLD }}'"
           [[ $FINALIZE_EXIT -eq 1 ]] && echo "::error::Finalize failed"
           exit $FINALIZE_EXIT
+      - name: Push dashboard to S3
+        if: always()
+        run: |
+          aws s3 sync ~/.reachable/scans/ \
+            "s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/state/" \
+            --exclude "*" --include "**/dashboard/**" --include "**/*.sarif" \
+            --include "**/raw/cve-analyzed.json" --include "**/raw/call-graph.json" \
+            --region "${{ env.S3_REGION }}"
       - name: Upload Dashboard
         if: always()
         uses: actions/upload-artifact@v4
@@ -351,25 +359,11 @@ jobs:
           name: security-dashboard
           path: ~/.reachable/scans/**/dashboard/
           retention-days: 30
-      - name: Export SARIF
+      - name: Upload SARIF to GitHub Security Tab
         if: always()
-        run: |
-          reachctl export --repo . --format sarif \
-            --repo-uri https://github.com/${{ github.repository }} \
-            --output /tmp/reachable.sarif || true
-      - name: Upload SARIF Artifact
-        if: always() && hashFiles('/tmp/reachable.sarif') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: sarif-report
-          path: /tmp/reachable.sarif
-          retention-days: 30
-      - name: Upload to GitHub Security Tab
-        if: always() && hashFiles('/tmp/reachable.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: /tmp/reachable.sarif
-          category: reachable
+          sarif_file: ~/.reachable/scans/
         continue-on-error: true
       - name: Post Summary
         if: always()
@@ -381,15 +375,12 @@ jobs:
             *) STATUS="❌ Error (exit ${EXIT})" ;;
           esac
           {
-            echo "## 🔒 REACHABLE Distributed Scan"
-            echo "**Status:** ${STATUS}"
-            echo "| Artifact | Location |"
-            echo "|----------|-|"
-            echo "| 📊 Dashboard | Actions → Artifacts → \`security-dashboard\` |"
-            echo "| 📋 SARIF | Security → Code scanning alerts |"
-          } >> $GITHUB_STEP_SUMMARY
+            echo "## 🔒 REACHABLE Managed Distributed Scan (S3)"
+            echo "**Status:** ${STATUS} | **Session:** ${{ needs.init.outputs.session_dir }}"
+            echo "**S3:** \`s3://${{ env.S3_BUCKET }}/${{ needs.init.outputs.s3_prefix }}/\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Enforce Threshold
         if: always()
         run: |
           EXIT="${{ steps.finalize.outputs.finalize_exit }}"
-          [ "$EXIT" = "1" ] || [ "$EXIT" = "2" ] && exit $EXIT || exit 0
+          [[ "$EXIT" == "1" || "$EXIT" == "2" ]] && exit "$EXIT" || exit 0

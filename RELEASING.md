@@ -24,7 +24,7 @@ Each release provides **15 wheels** covering:
 | Linux | ARM64 | 3.10, 3.11, 3.12, 3.13, 3.14 |
 | macOS | Universal (Intel + Apple Silicon) | 3.10, 3.11, 3.12, 3.13, 3.14 |
 
-Wheels are located in `wheels/v<version>/`. The `wheels/latest/` directory always points to the most recent release.
+Wheels are located in `wheels/v<version>/`.
 
 ---
 
