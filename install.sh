@@ -359,19 +359,19 @@ download_and_install() {
 verify_installation() {
     print_header "Verification"
     
-    echo ""
     VENV_REACHCTL="$HOME/.reachable/venv/bin/reachctl"
-    echo -e "${BOLD}Version:${NC}"
-    "$VENV_REACHCTL" version 2>&1 | sed 's/^/  /'
-    
+
     echo ""
     echo -e "${BOLD}Self-test:${NC}"
     if "$VENV_REACHCTL" selftest 2>&1 | sed 's/^/  /'; then
         print_ok "All checks passed"
     else
-        print_warn "Some optional dependencies missing"
-        print_info "Run 'reachctl doctor' to install them"
+        print_warn "Some tests failed (non-fatal)"
     fi
+
+    echo ""
+    echo -e "${BOLD}Version:${NC}"
+    "$VENV_REACHCTL" version 2>&1 | sed 's/^/  /'
 }
 
 # -----------------------------------------------------------------------------
