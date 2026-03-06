@@ -1,0 +1,168 @@
+// REACHABLE Security Scan — Jenkinsfile
+//
+// Copy this file to jenkins/Jenkinsfile in your repo.
+//
+// Declarative pipeline. All stages share the same agent workspace —
+// session state lives on disk, no artifact passing between stages.
+//
+// Parallel stage fans out secrets / malware / health / iac / ai / dlp
+// simultaneously, then finalize merges everything.
+//
+// ── Setup ─────────────────────────────────────────────────────────────
+//
+//   1. Create a Pipeline job → point at this file (Script Path: jenkins/Jenkinsfile)
+//
+//   2. Optional — skip download by setting an environment variable:
+//      Jenkins → Manage Jenkins → System → Global properties → Environment variables
+//      Name: REACH_LOCAL_WHEEL_DIR  |  Value: /opt/reachable/wheels
+//
+// ── State location ────────────────────────────────────────────────────
+//
+//   Default: ~/.reachable/scans/{repo-slug}/{branch}/{session}/
+//   Override: set REACHABLE_HOME env var to a shared NFS mount for
+//   multi-agent setups.
+//
+// Exit codes: 0 = clean, 2 = findings above threshold, 1 = scan error
+
+pipeline {
+
+    agent any  // Replace: agent { label 'reach-scanner' }
+
+    options {
+        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        REACHABLE_VERSION    = '1.0.0b16'
+        REACHABLE_DIST_REPO  = 'sthenos-security/reach-dist'
+        FAIL_THRESHOLD       = 'high'   // critical | high | medium | any | none
+    }
+
+    stages {
+
+        // ── Install ────────────────────────────────────────────────────
+        stage('Install REACHABLE') {
+            steps {
+                script {
+                    def pyTag = sh(
+                        script: "python3 -c 'import sys; print(f\"cp{sys.version_info.major}{sys.version_info.minor}\")'",
+                        returnStdout: true
+                    ).trim()
+                    def wheel = "reachable-${REACHABLE_VERSION}-${pyTag}-${pyTag}-linux_x86_64.whl"
+                    def localDir = env.REACH_LOCAL_WHEEL_DIR ?: ''
+
+                    if (localDir && fileExists("${localDir}/${wheel}")) {
+                        sh "pip install '${localDir}/${wheel}'"
+                    } else {
+                        sh """
+                            mkdir -p /tmp/rw
+                            curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/wheels/v${REACHABLE_VERSION}/${wheel}" \
+                                -o "/tmp/rw/${wheel}"
+                            pip install "/tmp/rw/${wheel}"
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── Init ──────────────────────────────────────────────────────
+        stage('Init') {
+            steps {
+                script {
+                    def output = sh(
+                        script: 'reachctl pipeline init . 2>&1',
+                        returnStdout: true
+                    ).trim()
+                    echo output
+
+                    def match = (output =~ /(\d{8}-\d{6}-[a-z0-9]+)/)
+                    if (!match) error("Could not parse session_id:\n${output}")
+                    env.SESSION_ID = match[0][1]
+                    echo "Session: ${env.SESSION_ID}"
+                }
+            }
+        }
+
+        // ── Scan: SBOM (Syft) + CVEs (Grype) ─────────────────────────
+        // Must complete before malware + health (SBOM cached in repo.db)
+        stage('Scan') {
+            steps {
+                sh 'reachctl pipeline step scan --session "$SESSION_ID"'
+            }
+        }
+
+        // ── Parallel analysis ─────────────────────────────────────────
+        // secrets/iac/ai/dlp: no scan dependency
+        // malware/health: read SBOM from repo.db — depend on scan
+        stage('Analyze') {
+            parallel {
+                stage('Secrets + CWE') {
+                    steps { sh 'reachctl pipeline step secrets --session "$SESSION_ID"' }
+                }
+                stage('Malware') {
+                    steps { sh 'reachctl pipeline step malware --session "$SESSION_ID"' }
+                }
+                stage('Package Health') {
+                    steps { sh 'reachctl pipeline step health --session "$SESSION_ID"' }
+                }
+                stage('IaC') {
+                    steps { sh 'reachctl pipeline step iac --session "$SESSION_ID"' }
+                }
+                stage('AI/LLM Security') {
+                    steps { sh 'reachctl pipeline step ai --session "$SESSION_ID"' }
+                }
+                stage('DLP/PII') {
+                    steps { sh 'reachctl pipeline step dlp --session "$SESSION_ID"' }
+                }
+            }
+        }
+
+        // ── Finalize: call graph + BFS reachability + correlation + dashboard
+        stage('Finalize') {
+            steps {
+                script {
+                    def result = sh(
+                        script: """
+                            set +e
+                            reachctl pipeline finalize \\
+                                --session "\$SESSION_ID" \\
+                                --fail-on "\$FAIL_THRESHOLD"
+                            echo \$?
+                        """,
+                        returnStdout: true
+                    ).trim()
+                    def exitCode = result.split('\n').last().trim()
+                    env.FINALIZE_EXIT = exitCode
+
+                    if (exitCode == '2') {
+                        unstable("REACHABLE: findings above threshold '${env.FAIL_THRESHOLD}'")
+                    } else if (exitCode != '0') {
+                        error("REACHABLE: finalize failed (exit ${exitCode})")
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                sh "mkdir -p build/dashboard && find \${HOME}/.reachable/scans -type d -name dashboard -exec cp -r {}/ build/dashboard/ \\; 2>/dev/null || true"
+                archiveArtifacts artifacts: 'build/dashboard/**', allowEmptyArchive: true
+
+                sh "find \${HOME}/.reachable/scans -name 'reachable.sarif' -exec cp {} build/ \\; 2>/dev/null || true"
+                archiveArtifacts artifacts: 'build/reachable.sarif', allowEmptyArchive: true
+
+                def status = env.FINALIZE_EXIT == '0' ? '✅ Clean'
+                           : env.FINALIZE_EXIT == '2' ? '⚠ Findings'
+                                                      : '❌ Error'
+                currentBuild.description = "${status} | ${env.SESSION_ID} | v${env.REACHABLE_VERSION}"
+            }
+        }
+        success  { echo "REACHABLE: clean (no findings above ${FAIL_THRESHOLD})" }
+        unstable { echo "REACHABLE: findings above threshold (${FAIL_THRESHOLD})" }
+        failure  { echo "REACHABLE: scan error — check logs" }
+    }
+}
