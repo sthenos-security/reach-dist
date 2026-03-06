@@ -48,7 +48,7 @@ jobs:
         run: |
           VERSION="${{ env.REACHABLE_VERSION }}"
           if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+            VERSION=$(curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/VERSION" | tr -d '[:space:]')
             echo "Resolved latest: ${VERSION}"
           fi
           PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
