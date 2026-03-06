@@ -1,0 +1,213 @@
+# REACHABLE Security Scan — GitLab CI
+#
+# Copy this file to .gitlab-ci.yml in your repo.
+#
+# Three deployment models:
+#
+#   A) GitLab SaaS (managed runners)
+#      - Serial pipeline (single runner), no shared state needed
+#      - State passed via GitLab artifacts
+#
+#   B) Self-managed runners with shared volume
+#      - Parallel pipeline, REACHABLE_HOME points to shared mount
+#      - NO artifact passing between jobs — state lives on the volume
+#      - Volume can be NFS, CephFS, EFS, or any ReadWriteMany mount
+#
+#   C) GitLab + S3 (managed or self-managed, distributed)
+#      - Set REACH_S3_BUCKET / REACH_S3_REGION / AWS credentials
+#
+# ── Variables ─────────────────────────────────────────────────────────
+# Set in: Project → Settings → CI/CD → Variables
+#
+#   Required:
+#     REACH_DIST_TOKEN         — GitHub PAT (repo scope) [Masked]
+#
+#   Self-hosted volume model:
+#     REACHABLE_HOME           — shared mount path (e.g. /mnt/reachable)
+#     REACH_LOCAL_WHEEL_DIR    — path to pre-downloaded wheels (optional)
+#
+#   S3 model (optional):
+#     REACH_S3_BUCKET          — S3 bucket name
+#     REACH_S3_REGION          — e.g. us-east-1
+#     AWS_ACCESS_KEY_ID        [Masked]
+#     AWS_SECRET_ACCESS_KEY    [Masked]
+#
+# ── Exit codes ────────────────────────────────────────────────────────
+#   0 = clean, 2 = findings above threshold, 1 = scan error
+
+variables:
+  REACHABLE_VERSION: "1.0.0b16"
+  REACHABLE_DIST_REPO: "sthenos-security/reach-dist"
+  FAIL_THRESHOLD: "high"          # critical | high | medium | any | none
+  PYTHON_VERSION: "3.11"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+
+  # Self-hosted: set REACHABLE_HOME to shared mount — state is inherently shared
+  # Managed: leave unset — state stored in ~/.reachable (inside each job's runner)
+  # REACHABLE_HOME: "/mnt/reachable"
+
+  # State dir used for artifact passing in managed/serial mode
+  REACH_STATE_DIR: "$CI_PROJECT_DIR/.reachable-state"
+
+stages:
+  - install
+  - init
+  - scan
+  - analyze
+  - finalize
+
+default:
+  image: python:${PYTHON_VERSION}-slim
+
+  # Runner selection:
+  #   Managed (GitLab SaaS): remove tags block or use saas-linux-medium-amd64
+  #   Self-managed: set tags to match your runner labels
+  # tags:
+  #   - self-hosted
+  #   - linux
+  #   - x64
+
+  cache:
+    key: "reachable-${REACHABLE_VERSION}-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .pip-cache/
+
+  before_script:
+    - apt-get update -qq && apt-get install -qq -y curl git 2>/dev/null | tail -1
+    - python3 -m pip install --upgrade pip --quiet
+    - |
+      PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+      WHEEL="reachable-${REACHABLE_VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+
+      if [ -n "${REACH_LOCAL_WHEEL_DIR:-}" ] && [ -f "$REACH_LOCAL_WHEEL_DIR/$WHEEL" ]; then
+        echo "Installing from local path"
+        pip install "$REACH_LOCAL_WHEEL_DIR/$WHEEL" --quiet
+
+      elif pip show reachable 2>/dev/null | grep -q "Version: ${REACHABLE_VERSION}"; then
+        echo "REACHABLE ${REACHABLE_VERSION} already installed"
+
+      else
+        echo "Downloading wheel"
+        mkdir -p /tmp/rw
+        curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/wheels/v${REACHABLE_VERSION}/${WHEEL}" \
+          -o "/tmp/rw/${WHEEL}"
+        pip install "/tmp/rw/${WHEEL}" --quiet
+      fi
+    - mkdir -p "${REACH_STATE_DIR}"
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+.state_artifact: &state_artifact
+  artifacts:
+    paths:
+      - .reachable-state/
+    expire_in: 2 hours
+    when: always
+
+install:
+  stage: install
+  script:
+    - reachctl version
+    - echo "REACHABLE ${REACHABLE_VERSION} ready"
+
+init:
+  stage: init
+  needs: [install]
+  script:
+    - |
+      OUTPUT=$(reachctl pipeline init "${CI_PROJECT_DIR}" 2>&1)
+      echo "$OUTPUT"
+      SESSION_ID=$(echo "$OUTPUT" | grep -oE '[0-9]{8}-[0-9]{6}-[a-z0-9]+' | head -1)
+      [ -z "$SESSION_ID" ] && { echo "ERROR: Could not parse session_id"; exit 1; }
+      echo "SESSION_ID=${SESSION_ID}" > "${REACH_STATE_DIR}/.session_env"
+      echo "Session: ${SESSION_ID}"
+  <<: *state_artifact
+
+scan:
+  stage: scan
+  needs: [init]
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - reachctl pipeline step scan --session "$SESSION_ID"
+  <<: *state_artifact
+
+scan-secrets:
+  stage: analyze
+  needs: [scan]
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - reachctl pipeline step secrets --session "$SESSION_ID"
+  <<: *state_artifact
+
+malware:
+  stage: analyze
+  needs: [scan]
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - reachctl pipeline step malware --session "$SESSION_ID"
+  <<: *state_artifact
+
+health:
+  stage: analyze
+  needs: [scan]
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - reachctl pipeline step health --session "$SESSION_ID"
+  <<: *state_artifact
+
+iac:
+  stage: analyze
+  needs: [init]
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - reachctl pipeline step iac --session "$SESSION_ID"
+  <<: *state_artifact
+
+ai-security:
+  stage: analyze
+  needs: [init]
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - reachctl pipeline step ai --session "$SESSION_ID"
+  <<: *state_artifact
+
+dlp-pii:
+  stage: analyze
+  needs: [init]
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - reachctl pipeline step dlp --session "$SESSION_ID"
+  <<: *state_artifact
+
+finalize:
+  stage: finalize
+  needs: [scan-secrets, malware, health, iac, ai-security, dlp-pii]
+  allow_failure:
+    exit_codes: 2
+  script:
+    - source "${REACH_STATE_DIR}/.session_env"
+    - |
+      set +e
+      reachctl pipeline finalize \
+        --session "$SESSION_ID" \
+        --fail-on "$FAIL_THRESHOLD"
+      FINALIZE_EXIT=$?
+      mkdir -p build
+      find "${REACH_STATE_DIR}" ~/.reachable/scans -type d -name dashboard \
+        -exec cp -r {}/ build/dashboard/ \; 2>/dev/null || true
+      find "${REACH_STATE_DIR}" ~/.reachable/scans -name "reachable.sarif" \
+        -exec cp {} build/reachable.sarif \; 2>/dev/null || true
+      exit $FINALIZE_EXIT
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - build/dashboard/
+      - build/reachable.sarif
+    reports:
+      sast: build/reachable.sarif
