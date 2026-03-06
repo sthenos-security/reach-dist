@@ -48,51 +48,52 @@ jobs:
         run: |
           VERSION="${{ env.REACHABLE_VERSION }}"
           if [[ -z "$VERSION" ]]; then
-            VERSION=$(curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/VERSION" | tr -d '[:space:]')
+            VERSION=$(curl -sL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/releases/latest" \
+              | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))")
             echo "Resolved latest: ${VERSION}"
           fi
           PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
           WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          curl -fsSL "https://github.com/${{ env.REACHABLE_DIST_REPO }}/releases/download/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
           pip install "/tmp/${WHEEL}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Initialize Pipeline
         run: |
-          OUTPUT=$(reachctl pipeline init . 2>&1)
-          echo "$OUTPUT"
-          SESSION_ID=$(echo "$OUTPUT" | grep -oE '[0-9]{8}-[0-9]{6}-[a-z0-9]+' | head -1)
-          [[ -z "$SESSION_ID" ]] && { echo "::error::Could not parse session_id"; exit 1; }
-          echo "SESSION_ID=${SESSION_ID}" >> "$GITHUB_ENV"
-          echo "::notice::Session: ${SESSION_ID}"
+          JSON=$(reachctl pipeline init . --json 2>/dev/null | grep '^{' | tail -1)
+          echo "$JSON"
+          SESSION_DIR=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_dir'])")
+          [[ -z "$SESSION_DIR" ]] && { echo "::error::Could not parse session directory"; exit 1; }
+          echo "SESSION_DIR=${SESSION_DIR}" >> "$GITHUB_ENV"
+          echo "::notice::Directory: ${SESSION_DIR}"
 
       - name: Scan — SBOM + Vulnerabilities
-        run: reachctl pipeline step scan --session "$SESSION_ID"
+        run: reachctl pipeline step scan --session "$SESSION_DIR"
 
       - name: Secrets + CWE
-        run: reachctl pipeline step secrets --session "$SESSION_ID"
+        run: reachctl pipeline step secrets --session "$SESSION_DIR"
 
       - name: Malware
-        run: reachctl pipeline step malware --session "$SESSION_ID"
+        run: reachctl pipeline step malware --session "$SESSION_DIR"
 
       - name: Package Health
-        run: reachctl pipeline step health --session "$SESSION_ID"
+        run: reachctl pipeline step health --session "$SESSION_DIR"
 
       - name: IaC
-        run: reachctl pipeline step iac --session "$SESSION_ID"
+        run: reachctl pipeline step iac --session "$SESSION_DIR"
 
       - name: AI/LLM Security
-        run: reachctl pipeline step ai --session "$SESSION_ID"
+        run: reachctl pipeline step ai --session "$SESSION_DIR"
 
       - name: DLP/PII
-        run: reachctl pipeline step dlp --session "$SESSION_ID"
+        run: reachctl pipeline step dlp --session "$SESSION_DIR"
 
       - name: Finalize — Reachability + Dashboard
         id: finalize
         continue-on-error: true
         run: |
           set +e
-          reachctl pipeline finalize --session "$SESSION_ID" --fail-on "${{ env.FAIL_THRESHOLD }}"
+          reachctl pipeline finalize --session "$SESSION_DIR" --fail-on "${{ env.FAIL_THRESHOLD }}"
           FINALIZE_EXIT=$?
           echo "finalize_exit=${FINALIZE_EXIT}" >> "$GITHUB_OUTPUT"
           [[ $FINALIZE_EXIT -eq 2 ]] && echo "::warning::Findings above threshold '${{ env.FAIL_THRESHOLD }}'"
@@ -141,7 +142,7 @@ jobs:
           esac
           {
             echo "## 🔒 REACHABLE Security Scan"
-            echo "**Status:** ${STATUS} | **Session:** ${SESSION_ID}"
+            echo "**Status:** ${STATUS} | **Session:** ${SESSION_DIR}"
             echo ""
             echo "Scanners: CVE · Secrets+CWE · Malware · Health · IaC · AI/LLM · DLP/PII"
             echo "| Artifact | Location |"
