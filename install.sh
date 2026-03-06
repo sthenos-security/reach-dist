@@ -35,8 +35,7 @@ REPO="sthenos-security/reach-dist"
 
 # Resolve latest version from wheels/ directory listing (no auth required)
 resolve_version() {
-    curl -fsSL "https://api.github.com/repos/${REPO}/contents/wheels" \
-        | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))" 2>/dev/null
+    curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/VERSION" 2>/dev/null | tr -d '[:space:]'
 }
 
 VERSION=""
