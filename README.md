@@ -53,26 +53,81 @@ curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/in
 
 ---
 
-## Getting Started
+## Release Verification
+
+Every REACHABLE release is signed and checksummed. The installer verifies both automatically before installing anything.
+
+**SHA-256 checksum** — verified on every install. If the checksum does not match, the installer aborts immediately.
+
+**Cosign signature** — verified if `cosign` is installed. Each wheel is signed via [Sigstore](https://sigstore.dev) keyless signing tied to the GitHub Actions workflow that built it, providing a tamper-proof audit trail from source to binary.
+
+To verify manually:
 
 ```bash
-reachctl version      # Verify installation
-reachctl doctor       # Check and install dependencies
-reachctl selftest     # Run self-diagnostics
-reachctl primer       # Quick-start guide
+# SHA-256
+sha256sum --check checksums.sha256
+
+# Cosign (requires cosign installed)
+cosign verify-blob \
+  --bundle reachable-<version>-<platform>.whl.cosign.bundle \
+  --certificate-identity-regexp "https://github.com/sthenos-security/" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  reachable-<version>-<platform>.whl
 ```
 
-### Run a Scan
+Checksums and bundles for all releases are in `wheels/v<version>/`.
+
+---
+
+## Getting Started
+
+### 1. Add to PATH
+
+The installer puts `reachctl` in `~/.reachable/venv/bin/`. Add it to your PATH — **required before running any command**:
+
+```bash
+export PATH="$HOME/.reachable/venv/bin:$PATH"
+```
+
+To make it permanent, add the line above to your `~/.zshrc` or `~/.bashrc`, then restart your shell.
+
+### 2. Install Dependencies
+
+```bash
+reachctl doctor
+```
+
+This installs the scanning tools (Syft, Grype, GuardDog). Run it once after installation.
+
+### 3. Run a Scan
 
 ```bash
 reachctl scan /path/to/your/repo
+```
+
+That's it. REACHABLE will scan your repository and open an interactive dashboard with the results.
+
+### What's Next
+
+```bash
+reachctl primer       # Full command reference and advanced options
+reachctl --help       # Quick command overview
 ```
 
 ---
 
 ## CI/CD Integration
 
-Sample workflows for GitHub Actions, GitLab CI, and Jenkins are available in the `cicd-templates/` directory.
+Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins are included in `cicd-templates/`:
+
+```
+cicd-templates/
+├── github-actions/
+├── gitlab/
+└── jenkins/
+```
+
+Copy the relevant template into your repository and adjust the `FAIL_THRESHOLD` as needed.
 
 ---
 
@@ -83,7 +138,7 @@ REACHABLE stores data in `~/.reachable/`:
 ```
 ~/.reachable/
 ├── scans/     # Scan history and results
-├── cache/     # Cached SBOM and call graph data
+├── cache/     # Cached data
 └── config/    # Configuration files
 ```
 
@@ -111,10 +166,10 @@ rm -rf ~/.reachable
 ### `reachctl: command not found`
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.reachable/venv/bin:$PATH"
 ```
 
-Add this to your shell profile (`~/.zshrc` or `~/.bashrc`) to make it permanent.
+Add this to your `~/.zshrc` or `~/.bashrc` to make it permanent.
 
 ---
 
