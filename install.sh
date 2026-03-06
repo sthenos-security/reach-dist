@@ -33,9 +33,10 @@ set -e
 # -----------------------------------------------------------------------------
 REPO="sthenos-security/reach-dist"
 
-# Resolve latest version from wheels/ directory listing (no auth required)
+# Resolve latest version from GitHub releases API (no auth required)
 resolve_version() {
-    curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/VERSION" 2>/dev/null | tr -d '[:space:]'
+    curl -sL "https://api.github.com/repos/${REPO}/releases/latest" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))"
 }
 
 VERSION=""
