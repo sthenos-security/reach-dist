@@ -32,12 +32,21 @@ set -e
 # Configuration
 # -----------------------------------------------------------------------------
 REPO="sthenos-security/reach-dist"
-CORE_REPO="sthenos-security/reach-core"
 
-# Resolve latest version from reach-core GitHub releases (source of truth)
+# Resolve latest version from reach-dist GitHub releases API
 resolve_version() {
-    curl -sL "https://api.github.com/repos/${CORE_REPO}/releases/latest" \
-        | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'].lstrip('v'))"
+    local response
+    response=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest")
+    echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+tag = data.get('tag_name', '')
+if not tag:
+    msg = data.get('message', 'unknown error')
+    sys.stderr.write('Error resolving latest version: ' + msg + '\n')
+    sys.exit(1)
+print(tag.lstrip('v'))
+"
 }
 
 VERSION=""
