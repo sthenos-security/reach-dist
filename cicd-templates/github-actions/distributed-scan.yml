@@ -1,0 +1,408 @@
+# REACHABLE Distributed Security Scan
+#
+# Runs security analysis in parallel across multiple runners for faster results.
+# State is shared between jobs via GitHub Artifacts.
+#
+# Setup: copy this file to .github/workflows/reachable-scan.yml in your repo.
+#
+# No secrets required — wheels are downloaded from the public reach-dist repo.
+# Set REACHABLE_VERSION to pin a specific version; leave empty for latest.
+
+name: REACHABLE Distributed Scan
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+
+env:
+  # Leave empty to always install the latest release.
+  # Pin to a specific version for reproducible builds: "1.0.0b16"
+  REACHABLE_VERSION: ""
+  REACHABLE_DIST_REPO: "sthenos-security/reach-dist"
+  FAIL_THRESHOLD: "high"  # critical, high, medium, any, none
+
+# Shared install snippet (repeated per job — GitHub Actions has no anchors):
+#   VERSION=$(curl wheels/ dir listing → pick latest v* folder)
+#   curl raw.githubusercontent.com → pip install → add to PATH
+
+jobs:
+  # ============================================================================
+  # INIT: Create session + repo.db
+  # ============================================================================
+  init:
+    name: Initialize Pipeline
+    runs-on: ubuntu-latest
+    outputs:
+      session_id: ${{ steps.init.outputs.session_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+            echo "Resolved latest: ${VERSION}"
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize Pipeline
+        id: init
+        run: |
+          OUTPUT=$(reachctl pipeline init . 2>&1)
+          echo "$OUTPUT"
+          SESSION_ID=$(echo "$OUTPUT" | grep -E '^Session:' | awk '{print $NF}')
+          [[ -z "$SESSION_ID" ]] && { echo "::error::Could not parse session_id"; exit 1; }
+          echo "session_id=${SESSION_ID}" >> $GITHUB_OUTPUT
+
+      - name: Upload Session State
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-init
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  # ============================================================================
+  # SCAN: Syft (SBOM) + Grype (CVEs) — required first, feeds malware + health
+  # ============================================================================
+  scan:
+    name: SBOM + Vulnerability Scan
+    needs: init
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache Grype DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/grype
+          key: grype-db-${{ runner.os }}-${{ hashFiles('**/requirements*.txt', '**/go.sum', '**/package-lock.json') }}
+          restore-keys: grype-db-${{ runner.os }}-
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: session-init
+          path: ~/.reachable/scans/
+      - run: reachctl pipeline step scan --session ${{ needs.init.outputs.session_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step-scan
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  secrets:
+    name: Secrets + CWE Scan
+    needs: init
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: session-init
+          path: ~/.reachable/scans/
+      - run: reachctl pipeline step secrets --session ${{ needs.init.outputs.session_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step-secrets
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  malware:
+    name: Malware Detection
+    needs: [init, scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: step-scan
+          path: ~/.reachable/scans/
+      - run: reachctl pipeline step malware --session ${{ needs.init.outputs.session_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step-malware
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  health:
+    name: Package Health
+    needs: [init, scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: step-scan
+          path: ~/.reachable/scans/
+      - run: reachctl pipeline step health --session ${{ needs.init.outputs.session_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step-health
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  iac:
+    name: IaC Scan
+    needs: init
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: session-init
+          path: ~/.reachable/scans/
+      - run: reachctl pipeline step iac --session ${{ needs.init.outputs.session_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step-iac
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  ai:
+    name: AI/LLM Security Scan
+    needs: init
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: session-init
+          path: ~/.reachable/scans/
+      - run: reachctl pipeline step ai --session ${{ needs.init.outputs.session_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step-ai
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  dlp:
+    name: DLP/PII Scan
+    needs: init
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          name: session-init
+          path: ~/.reachable/scans/
+      - run: reachctl pipeline step dlp --session ${{ needs.init.outputs.session_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: step-dlp
+          path: ~/.reachable/scans/
+          retention-days: 1
+
+  # ============================================================================
+  # FINALIZE: Merge all results → reachability analysis → dashboard
+  # ============================================================================
+  finalize:
+    name: Finalize + Dashboard
+    needs: [init, scan, secrets, malware, health, iac, ai, dlp]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Cache Grype DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/grype
+          key: grype-db-${{ runner.os }}-${{ hashFiles('**/requirements*.txt', '**/go.sum', '**/package-lock.json') }}
+          restore-keys: grype-db-${{ runner.os }}-
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+          fi
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Download All Step Results
+        uses: actions/download-artifact@v4
+        with:
+          path: ~/.reachable/scans/
+          pattern: step-*
+          merge-multiple: true
+      - name: Download Session State
+        uses: actions/download-artifact@v4
+        with:
+          name: session-init
+          path: ~/.reachable/scans/
+      - name: Finalize — Reachability + Correlation + Dashboard
+        id: finalize
+        continue-on-error: true
+        run: |
+          set +e
+          reachctl pipeline finalize \
+            --session ${{ needs.init.outputs.session_id }} \
+            --fail-on ${{ env.FAIL_THRESHOLD }}
+          FINALIZE_EXIT=$?
+          echo "finalize_exit=${FINALIZE_EXIT}" >> $GITHUB_OUTPUT
+          exit $FINALIZE_EXIT
+      - name: Upload Dashboard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-dashboard
+          path: ~/.reachable/scans/**/dashboard/
+          retention-days: 30
+      - name: Export SARIF
+        if: always()
+        run: |
+          reachctl export \
+            --repo . \
+            --format sarif \
+            --repo-uri https://github.com/${{ github.repository }} \
+            --output /tmp/reachable.sarif || true
+      - name: Upload SARIF Artifact
+        if: always() && hashFiles('/tmp/reachable.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif-report
+          path: /tmp/reachable.sarif
+          retention-days: 30
+      - name: Upload to GitHub Security Tab
+        if: always() && hashFiles('/tmp/reachable.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: /tmp/reachable.sarif
+          category: reachable
+        continue-on-error: true
+      - name: Post Summary
+        if: always()
+        run: |
+          EXIT="${{ steps.finalize.outputs.finalize_exit }}"
+          case "$EXIT" in
+            0) STATUS="✅ Clean" ;;
+            2) STATUS="⚠️ Findings above threshold (${{ env.FAIL_THRESHOLD }})" ;;
+            *) STATUS="❌ Scan error (exit ${EXIT})" ;;
+          esac
+          {
+            echo "## 🔒 REACHABLE Distributed Scan"
+            echo "**Status:** ${STATUS}"
+            echo ""
+            echo "| Artifact | Location |"
+            echo "|----------|-|"
+            echo "| 📊 Dashboard | Actions → Artifacts → \`security-dashboard\` |"
+            echo "| 📋 SARIF | Security → Code scanning alerts |"
+          } >> $GITHUB_STEP_SUMMARY
+      - name: Enforce Threshold
+        if: always()
+        run: |
+          EXIT="${{ steps.finalize.outputs.finalize_exit }}"
+          [ "$EXIT" = "1" ] || [ "$EXIT" = "2" ] && exit $EXIT || exit 0

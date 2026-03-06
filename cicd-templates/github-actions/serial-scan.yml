@@ -1,0 +1,179 @@
+# REACHABLE Security Scan — Serial (GitHub-Managed Runners)
+#
+# Runs all pipeline steps sequentially on a single GitHub-hosted runner.
+# Session state lives on the runner's local filesystem — no artifact
+# upload/download between steps. Simpler and sufficient for most repos.
+#
+# No secrets required for installation — wheels are downloaded from
+# the public GitHub release. GITHUB_TOKEN is optional (improves rate limits).
+#
+# Setup: copy this file to .github/workflows/reachable-scan.yml in your repo.
+
+name: REACHABLE Serial Scan
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+
+env:
+  # Leave empty to always install the latest release.
+  # Pin to a specific version for reproducible builds:
+  #   REACHABLE_VERSION: "1.0.0b16"
+  REACHABLE_VERSION: ""
+  REACHABLE_DIST_REPO: "sthenos-security/reach-dist"
+  FAIL_THRESHOLD: "high"  # critical | high | medium | any | none
+
+jobs:
+  scan:
+    name: REACHABLE Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache Grype DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/grype
+          key: grype-db-${{ runner.os }}-${{ hashFiles('**/requirements*.txt', '**/go.sum', '**/package-lock.json') }}
+          restore-keys: grype-db-${{ runner.os }}-
+
+      - name: Install REACHABLE
+        run: |
+          VERSION="${{ env.REACHABLE_VERSION }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION=$(curl -fsSL "https://api.github.com/repos/${{ env.REACHABLE_DIST_REPO }}/contents/wheels" | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))")
+            echo "Latest release: ${VERSION}"
+          fi
+          echo "REACHABLE_RESOLVED_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          PY_TAG="cp$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+          WHEEL="reachable-${VERSION}-${PY_TAG}-${PY_TAG}-linux_x86_64.whl"
+          curl -fsSL \
+            "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/wheels/v${VERSION}/${WHEEL}" \
+            -o "/tmp/${WHEEL}"
+          pip install "/tmp/${WHEEL}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize Pipeline
+        run: |
+          OUTPUT=$(reachctl pipeline init . 2>&1)
+          echo "$OUTPUT"
+          SESSION_ID=$(echo "$OUTPUT" | grep -E '^Session:' | awk '{print $NF}')
+          if [[ -z "$SESSION_ID" ]]; then
+            echo "::error::Could not parse session_id from pipeline init output"
+            exit 1
+          fi
+          echo "SESSION_ID=${SESSION_ID}" >> "$GITHUB_ENV"
+
+      - name: SBOM + Vulnerabilities
+        run: reachctl pipeline step scan --session "$SESSION_ID"
+
+      - name: Secrets + CWE
+        run: reachctl pipeline step secrets --session "$SESSION_ID"
+
+      - name: Malware Detection
+        run: reachctl pipeline step malware --session "$SESSION_ID"
+
+      - name: Package Health
+        run: reachctl pipeline step health --session "$SESSION_ID"
+
+      - name: IaC Scan
+        run: reachctl pipeline step iac --session "$SESSION_ID"
+
+      - name: AI/LLM Security
+        run: reachctl pipeline step ai --session "$SESSION_ID"
+
+      - name: DLP/PII
+        run: reachctl pipeline step dlp --session "$SESSION_ID"
+
+      - name: Finalize — Reachability + Dashboard
+        id: finalize
+        continue-on-error: true
+        run: |
+          set +e
+          reachctl pipeline finalize \
+            --session "$SESSION_ID" \
+            --fail-on "${{ env.FAIL_THRESHOLD }}"
+          FINALIZE_EXIT=$?
+          echo "finalize_exit=${FINALIZE_EXIT}" >> "$GITHUB_OUTPUT"
+          if [[ $FINALIZE_EXIT -eq 2 ]]; then
+            echo "::warning::REACHABLE: findings above threshold '${{ env.FAIL_THRESHOLD }}'"
+          elif [[ $FINALIZE_EXIT -eq 1 ]]; then
+            echo "::error::REACHABLE: finalize failed — check logs"
+          fi
+          exit $FINALIZE_EXIT
+
+      - name: Upload Dashboard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-dashboard
+          path: ~/.reachable/scans/**/dashboard/
+          retention-days: 30
+
+      - name: Export SARIF
+        if: always()
+        run: |
+          reachctl export \
+            --repo . \
+            --format sarif \
+            --repo-uri https://github.com/${{ github.repository }} \
+            --output /tmp/reachable.sarif || true
+
+      - name: Upload SARIF Artifact
+        if: always() && hashFiles('/tmp/reachable.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif-report
+          path: /tmp/reachable.sarif
+          retention-days: 30
+
+      - name: Upload to GitHub Security Tab
+        if: always() && hashFiles('/tmp/reachable.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: /tmp/reachable.sarif
+          category: reachable
+        continue-on-error: true
+
+      - name: Post Summary
+        if: always()
+        run: |
+          EXIT="${{ steps.finalize.outputs.finalize_exit }}"
+          case "$EXIT" in
+            0) STATUS="✅ Clean" ;;
+            2) STATUS="⚠️ Findings above threshold (${{ env.FAIL_THRESHOLD }})" ;;
+            *) STATUS="❌ Scan error (exit ${EXIT})" ;;
+          esac
+          {
+            echo "## 🔒 REACHABLE Security Scan"
+            echo "**Status:** ${STATUS}"
+            echo "**Version:** ${{ env.REACHABLE_RESOLVED_VERSION }}"
+            echo ""
+            echo "Scanners: CVE · Secrets · CWE · Malware · Health · IaC · AI/LLM · DLP/PII"
+            echo ""
+            echo "| Artifact | Location |"
+            echo "|----------|----------|"
+            echo "| 📊 Dashboard | Actions → Artifacts → \`security-dashboard\` |"
+            echo "| 📋 SARIF | Security → Code scanning alerts |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce Threshold
+        if: always()
+        run: |
+          EXIT="${{ steps.finalize.outputs.finalize_exit }}"
+          if [[ "$EXIT" == "1" || "$EXIT" == "2" ]]; then
+            exit "$EXIT"
+          fi
