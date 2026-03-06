@@ -298,13 +298,13 @@ download_and_install() {
         # Uninstall previous version
         if pip3 show reachable &> /dev/null; then
             print_step "Removing previous installation"
-            pip3 uninstall reachable -y -q
+            pip3 uninstall reachable -y -q 2>/dev/null || true
             print_ok "Previous version removed"
         fi
         
         # Install
         print_step "Installing REACHABLE"
-        pip3 install "$LOCAL_WHEEL" -q
+        pip3 install --user "$LOCAL_WHEEL" -q
         print_ok "Installation complete"
         return
     fi
@@ -337,13 +337,13 @@ download_and_install() {
     # Uninstall previous version
     if pip3 show reachable &> /dev/null; then
         print_step "Removing previous installation"
-        pip3 uninstall reachable -y -q
+        pip3 uninstall reachable -y -q 2>/dev/null || true
         print_ok "Previous version removed"
     fi
     
     # Install
     print_step "Installing REACHABLE v$VERSION"
-    pip3 install "$WHEEL_FILE" -q
+    pip3 install --user "$WHEEL_FILE" -q
     print_ok "Installation complete"
     
     # Cleanup
