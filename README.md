@@ -175,6 +175,25 @@ export PATH="$HOME/.reachable/venv/bin:$PATH"
 
 Add this to your `~/.zshrc` or `~/.bashrc` to make it permanent.
 
+### `Error resolving latest version: no releases found`
+
+This means the GitHub releases API returned an empty list for `reach-dist`. It is **not** a rate limit issue under normal usage. The most common cause is that the release build workflow failed to create the release on `reach-dist` — the wheels may have been built but the final publish step silently failed.
+
+Check the [reach-core Actions page](https://github.com/sthenos-security/reach-core/actions) to confirm the release job completed. If it did but the release is missing from reach-dist, it can be created manually:
+
+```bash
+gh release create vX.X.Xb21 --repo sthenos-security/reach-dist \
+  --title "REACHABLE vX.X.Xb21" \
+  --notes "Wheels for X.X.Xb21." --prerelease
+```
+
+If you genuinely are hitting the GitHub API rate limit (unlikely — unauthenticated limit is 60 req/hr), you can pass a token:
+
+```bash
+export GITHUB_TOKEN="ghp_yourtoken"  # no scopes required
+curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+```
+
 ---
 
 ## Support
