@@ -36,14 +36,16 @@ REPO="sthenos-security/reach-dist"
 # Resolve latest version from reach-dist GitHub releases API
 resolve_version() {
     local response
-    response=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest")
+    response=$(curl -sL "https://api.github.com/repos/${REPO}/releases")
     echo "$response" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-tag = data.get('tag_name', '')
+if not isinstance(data, list) or not data:
+    sys.stderr.write('Error resolving latest version: no releases found\n')
+    sys.exit(1)
+tag = data[0].get('tag_name', '')
 if not tag:
-    msg = data.get('message', 'unknown error')
-    sys.stderr.write('Error resolving latest version: ' + msg + '\n')
+    sys.stderr.write('Error resolving latest version: missing tag_name\n')
     sys.exit(1)
 print(tag.lstrip('v'))
 "
