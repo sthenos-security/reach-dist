@@ -13,23 +13,16 @@
 #
 #  Usage:
 #
-#    # Option 1: Clone and run (prompts for GitHub auth)
-#    git clone https://github.com/sthenos-security/reach-dist.git
-#    cd reach-dist && ./install.sh
+#    # Standard install (no auth required)
+#    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
 #
-#    # Option 2: curl with token
-#    export GITHUB_TOKEN=ghp_xxxx
-#    curl -H "Authorization: token $GITHUB_TOKEN" \
-#      -H "Accept: application/vnd.github.v3.raw" \
-#      -sL https://api.github.com/repos/sthenos-security/reach-dist/contents/install.sh | bash
-#
-#    # Option 3: Local wheel install (download both files first)
-#    ./install.sh --wheel ./wheels/latest/reachable-1.0.0b10-cp311-*.whl
+#    # Local wheel install
+#    ./install.sh --wheel /path/to/reachable-<version>-<platform>.whl
 #
 #  Other options:
-#    ./install.sh --update    # Upgrade with backup
-#    ./install.sh --clean     # Clean install (removes data)
-#    ./install.sh --version 1.0.0-beta10
+#    ./install.sh --update          # Upgrade with backup
+#    ./install.sh --clean           # Clean install (removes data)
+#    ./install.sh --version <ver>   # Install specific version
 #
 # =============================================================================
 
@@ -38,9 +31,16 @@ set -e
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-VERSION="1.0.0-beta10"
-WHEEL_VERSION="1.0.0b10"
 REPO="sthenos-security/reach-dist"
+
+# Resolve latest version from wheels/ directory listing (no auth required)
+resolve_version() {
+    curl -fsSL "https://api.github.com/repos/${REPO}/contents/wheels" \
+        | python3 -c "import sys,json;d=sorted([e['name'] for e in json.load(sys.stdin) if e['type']=='dir' and e['name'].startswith('v')]);print(d[-1].lstrip('v'))" 2>/dev/null
+}
+
+VERSION=""
+WHEEL_VERSION=""
 
 # -----------------------------------------------------------------------------
 # Parse Arguments
@@ -97,12 +97,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Apply custom version if specified
+# Apply custom version or resolve latest
 if [[ -n "$CUSTOM_VERSION" ]]; then
     VERSION="$CUSTOM_VERSION"
-    # Convert 1.0.0-beta8 to 1.0.0b8 for wheel filename
-    WHEEL_VERSION=$(echo "$VERSION" | sed 's/-beta/b/')
+else
+    VERSION=$(resolve_version)
+    if [[ -z "$VERSION" ]]; then
+        echo "Error: could not resolve latest version from ${REPO}"
+        exit 1
+    fi
 fi
+WHEEL_VERSION="$VERSION"
 
 # -----------------------------------------------------------------------------
 # Colors & Formatting
@@ -221,62 +226,7 @@ detect_environment() {
 # -----------------------------------------------------------------------------
 # Setup GitHub CLI
 # -----------------------------------------------------------------------------
-setup_gh_cli() {
-    print_step "Checking GitHub CLI"
-    
-    if command -v gh &> /dev/null; then
-        GH_VERSION=$(gh --version | head -1 | awk '{print $3}')
-        print_ok "GitHub CLI installed (v$GH_VERSION)"
-    else
-        print_warn "GitHub CLI not found - installing..."
-        
-        if [[ "$OS" == "darwin" ]]; then
-            if command -v brew &> /dev/null; then
-                brew install gh
-            else
-                print_error "Homebrew not found. Install from https://brew.sh"
-                exit 1
-            fi
-        elif [[ "$OS" == "linux" ]]; then
-            if command -v apt-get &> /dev/null; then
-                # Debian/Ubuntu
-                curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-                sudo apt-get update -qq
-                sudo apt-get install -y gh
-            elif command -v dnf &> /dev/null; then
-                # RHEL/Fedora
-                sudo dnf install -y gh
-            elif command -v yum &> /dev/null; then
-                # CentOS
-                sudo yum install -y gh
-            else
-                print_error "Could not detect package manager"
-                echo ""
-                echo "  Install GitHub CLI manually:"
-                echo "  https://github.com/cli/cli#installation"
-                exit 1
-            fi
-        fi
-        
-        print_ok "GitHub CLI installed"
-    fi
-    
-    # Check authentication
-    print_step "Checking GitHub authentication"
-    
-    if gh auth status &> /dev/null; then
-        GH_USER=$(gh api user --jq '.login' 2>/dev/null || echo "authenticated")
-        print_ok "Logged in as: $GH_USER"
-    else
-        print_warn "Not authenticated - starting login..."
-        echo ""
-        echo -e "  ${DIM}A browser window will open, or you'll see a code to enter at github.com/login/device${NC}"
-        echo ""
-        gh auth login -h github.com -p https -w
-        print_ok "Authentication complete"
-    fi
-}
+# No GitHub CLI or auth needed — reach-dist is public
 
 # -----------------------------------------------------------------------------
 # Handle Existing Installation
@@ -369,19 +319,16 @@ download_and_install() {
     print_info "Release:    v$VERSION"
     print_info "File:       $WHEEL_FILE"
     
-    if ! gh release download "v${VERSION}" --repo "$REPO" --pattern "$WHEEL_FILE" 2>/dev/null; then
+    WHEEL_URL="https://raw.githubusercontent.com/${REPO}/main/wheels/v${VERSION}/${WHEEL_FILE}"
+    if ! curl -fsSL "$WHEEL_URL" -o "$WHEEL_FILE"; then
         print_error "Download failed"
         echo ""
+        echo "  URL: $WHEEL_URL"
         echo "  Possible causes:"
-        echo "    • No access to repository (contact adazzi@sthenosec.com)"
-        echo "    • Wheel for Python $PY_VERSION not available"
-        echo "    • Version v$VERSION does not exist"
+        echo "    • Version v$VERSION not yet available"
+        echo "    • Wheel for Python $PY_VERSION / $PLATFORM_TAG not available"
         echo ""
-        echo "  Available releases:"
-        gh release list --repo "$REPO" --limit 5 2>/dev/null | sed 's/^/    /' || echo "    (unable to list)"
-        echo ""
-        echo "  Available wheels in v$VERSION:"
-        gh release view "v${VERSION}" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null | sed 's/^/    /' || echo "    (unable to list)"
+        echo "  Contact: info@sthenosec.com"
         exit 1
     fi
     
@@ -450,9 +397,9 @@ print_success() {
         echo ""
     fi
     echo -e "  ${BOLD}Future Upgrades:${NC}"
-    echo "    cd /path/to/reach-dist && git pull && ./install.sh --update"
+    echo "    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update"
     echo ""
-    echo -e "  ${BOLD}Support:${NC} adazzi@sthenosec.com"
+    echo -e "  ${BOLD}Support:${NC} info@sthenosec.com"
     echo ""
 }
 
@@ -472,10 +419,6 @@ main() {
     
     detect_environment
     
-    # Only need GitHub CLI for remote installs
-    if [[ -z "$LOCAL_WHEEL" ]]; then
-        setup_gh_cli
-    fi
     
     handle_existing_install
     download_and_install
