@@ -320,6 +320,9 @@ download_and_install() {
         "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
         "$HOME/.reachable/venv/bin/pip" install "$LOCAL_WHEEL" -q
         print_ok "Installation complete"
+        if [[ -n "${GITHUB_PATH:-}" ]]; then
+            echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
+        fi
         return
     fi
     
@@ -410,6 +413,11 @@ download_and_install() {
 
     # Cleanup
     rm -rf "$DOWNLOAD_DIR"
+
+    # If running in GitHub Actions, add venv to PATH for subsequent steps
+    if [[ -n "${GITHUB_PATH:-}" ]]; then
+        echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
+    fi
 }
 
 # -----------------------------------------------------------------------------
