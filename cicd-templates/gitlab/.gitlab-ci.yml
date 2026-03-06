@@ -1,6 +1,10 @@
 # REACHABLE Security Scan — GitLab CI
 #
-# Copy this file to .gitlab-ci.yml in your repo.
+# Three deployment models:
+#
+#   A) GitLab SaaS (managed runners) — serial, state via artifacts
+#   B) Self-managed runners with shared volume — set REACHABLE_HOME
+#   C) GitLab + S3 — set REACH_S3_BUCKET / REACH_S3_REGION / AWS credentials
 #
 # ── Variables ─────────────────────────────────────────────────────────
 # Set in: Project → Settings → CI/CD → Variables
@@ -8,7 +12,7 @@
 #   REACHABLE_DIST_REPO  — dist repo (default: sthenos-security/reach-dist)
 #   REACHABLE_VERSION    — pin a version (default: latest)
 #   FAIL_THRESHOLD       — critical | high | medium | any | none (default: high)
-#   REACHABLE_HOME       — shared mount path for self-hosted volume model (optional)
+#   REACHABLE_HOME       — shared mount for self-hosted volume model (optional)
 #
 # ── Exit codes ────────────────────────────────────────────────────────
 #   0 = clean, 2 = findings above threshold, 1 = scan error
@@ -41,7 +45,12 @@ default:
     - |
       ARGS=""
       [ -n "${REACHABLE_VERSION}" ] && ARGS="--version ${REACHABLE_VERSION}"
-      curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS
+      if ! curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS; then
+        echo "ERROR: install.sh failed — check REACHABLE_DIST_REPO and REACHABLE_VERSION"
+        exit 1
+      fi
+      command -v reachctl >/dev/null 2>&1 || { echo "ERROR: reachctl not found after install"; exit 1; }
+      reachctl version
     - mkdir -p "${REACH_STATE_DIR}"
 
 workflow:
@@ -70,11 +79,27 @@ init:
   needs: [install]
   script:
     - |
-      JSON=$(reachctl pipeline init "${CI_PROJECT_DIR}" --json 2>/dev/null | grep '^{' | tail -1)
-      echo "$JSON"
-      SESSION_DIR=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_dir'])")
-      [ -z "$SESSION_DIR" ] && { echo "ERROR: Could not parse session_dir"; exit 1; }
+      RAW=$(reachctl pipeline init "${CI_PROJECT_DIR}" --json 2>&1)
+      JSON=$(echo "$RAW" | grep '^{' | tail -1)
+      if [ -z "$JSON" ]; then
+        echo "ERROR: No JSON output from reachctl pipeline init. Full output:"
+        echo "$RAW"
+        exit 1
+      fi
+      SESSION_DIR=$(echo "$JSON" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    v = d['session_dir']
+    if not v: raise ValueError('session_dir is empty')
+    print(v)
+except Exception as e:
+    sys.stderr.write('Failed to parse session_dir: ' + str(e) + '
+')
+    sys.exit(1)
+") || { echo "ERROR: Failed to parse session_dir — see above"; exit 1; }
       echo "SESSION_DIR=${SESSION_DIR}" > "${REACH_STATE_DIR}/.session_env"
+      echo "Session: ${SESSION_DIR}"
   <<: *state_artifact
 
 # ─────────────────────────────────────────────────────────────────────

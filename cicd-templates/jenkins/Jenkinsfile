@@ -1,14 +1,12 @@
 // REACHABLE Security Scan — Jenkinsfile
 //
-// Copy this file to jenkins/Jenkinsfile in your repo.
-//
 // Declarative pipeline. All stages share the same agent workspace —
 // session state lives on disk, no artifact passing between stages.
 //
 // ── Setup ─────────────────────────────────────────────────────────────
 //   1. Create a Pipeline job → Script Path: jenkins/Jenkinsfile
-//   2. Set REACHABLE_DIST_REPO, REACHABLE_VERSION, FAIL_THRESHOLD
-//      as Jenkins environment variables or leave defaults below.
+//   2. Optionally set REACHABLE_DIST_REPO, REACHABLE_VERSION, FAIL_THRESHOLD
+//      as Jenkins environment variables to override the defaults below.
 //
 // Exit codes: 0 = clean, 2 = findings above threshold, 1 = scan error
 
@@ -35,7 +33,12 @@ pipeline {
                 sh '''
                     ARGS=""
                     [ -n "${REACHABLE_VERSION}" ] && ARGS="--version ${REACHABLE_VERSION}"
-                    curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS
+                    if ! curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS; then
+                        echo "ERROR: install.sh failed"
+                        exit 1
+                    fi
+                    command -v reachctl >/dev/null 2>&1 || { echo "ERROR: reachctl not found after install"; exit 1; }
+                    reachctl version
                 '''
             }
         }
@@ -43,18 +46,38 @@ pipeline {
         stage('Init') {
             steps {
                 script {
-                    def output = sh(
-                        script: 'reachctl pipeline init . --json 2>/dev/null | grep \'^{\' | tail -1',
+                    // Capture full output including stderr — needed for diagnostics on failure
+                    def raw = sh(
+                        script: 'reachctl pipeline init . --json 2>&1',
                         returnStdout: true
                     ).trim()
-                    echo output
+                    // Extract the JSON line — must not use shell echo with Groovy strings (quoting hazard)
+                    def json = raw.split('\n').findAll { it.trim().startsWith('{') }.last() ?: ''
+                    if (!json) {
+                        echo "ERROR: No JSON from pipeline init. Full output:"
+                        echo raw
+                        error('pipeline init produced no JSON output')
+                    }
+                    // Write to file to avoid all shell quoting issues with arbitrary JSON
+                    writeFile file: '.reach-init.json', text: json
                     def sessionDir = sh(
-                        script: "echo '${output}' | python3 -c \"import sys,json; print(json.load(sys.stdin)['session_dir'])\"",
+                        script: '''python3 - <<'PYEOF'
+import sys, json
+try:
+    with open('.reach-init.json') as f:
+        d = json.load(f)
+    v = d.get('session_dir', '')
+    if not v: raise ValueError('session_dir is empty')
+    print(v)
+except Exception as e:
+    sys.stderr.write('Failed to parse session_dir: ' + str(e) + '\n')
+    sys.exit(1)
+PYEOF''',
                         returnStdout: true
                     ).trim()
-                    if (!sessionDir) error("Could not parse session_dir")
+                    if (!sessionDir) error('session_dir is empty after parse')
                     env.SESSION_DIR = sessionDir
-                    echo "Session dir: ${env.SESSION_DIR}"
+                    echo "Session: ${env.SESSION_DIR}"
                 }
             }
         }

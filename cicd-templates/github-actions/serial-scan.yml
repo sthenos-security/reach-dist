@@ -33,7 +33,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && vars.REACHABLE_GATE_ACTOR != ''
         run: |
           if [[ "${{ github.actor }}" != "${{ vars.REACHABLE_GATE_ACTOR }}" ]]; then
-            echo "❌ Not authorized: ${{ github.actor }}"
+            echo "::error::Not authorized: ${{ github.actor }}"
             exit 1
           fi
 
@@ -53,15 +53,36 @@ jobs:
         run: |
           ARGS=""
           [[ -n "${{ env.REACHABLE_VERSION }}" ]] && ARGS="--version ${{ env.REACHABLE_VERSION }}"
-          curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS
+          if ! curl -fsSL "https://raw.githubusercontent.com/${{ env.REACHABLE_DIST_REPO }}/main/install.sh" | bash -s -- $ARGS; then
+            echo "::error::install.sh failed — check REACHABLE_DIST_REPO and REACHABLE_VERSION"
+            exit 1
+          fi
+          if ! command -v reachctl &>/dev/null; then
+            echo "::error::reachctl not found after install — PATH issue or install failed silently"
+            exit 1
+          fi
+          reachctl version
 
       - name: Initialize Pipeline
         run: |
-          JSON=$(reachctl pipeline init . --json 2>/dev/null | grep '^{' | tail -1)
-          echo "$JSON"
-          SESSION_DIR=$(echo "$JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_dir'])")
-          [[ -z "$SESSION_DIR" ]] && { echo "::error::Could not parse session_dir from JSON"; exit 1; }
+          RAW=$(reachctl pipeline init . --json 2>&1)
+          JSON=$(echo "$RAW" | grep '^{' | tail -1)
+          if [[ -z "$JSON" ]]; then
+            echo "::error::No JSON output from reachctl pipeline init. Full output:"
+            echo "$RAW"
+            exit 1
+          fi
+          SESSION_DIR=$(echo "$JSON" | python3 -c "
+import sys, json
+try:
+    print(json.load(sys.stdin)['session_dir'])
+except (json.JSONDecodeError, KeyError) as e:
+    sys.stderr.write(f'Failed to parse session_dir: {e}\n')
+    sys.exit(1)
+") || { echo "::error::Failed to parse session_dir from JSON output"; exit 1; }
+          [[ -z "$SESSION_DIR" ]] && { echo "::error::session_dir is empty"; exit 1; }
           echo "SESSION_DIR=${SESSION_DIR}" >> "$GITHUB_ENV"
+          echo "Session: ${SESSION_DIR}"
 
       - name: Scan — SBOM + Vulnerabilities
         run: reachctl pipeline step scan --session "$SESSION_DIR"
