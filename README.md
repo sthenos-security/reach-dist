@@ -21,8 +21,8 @@ REACHABLE scans your repository and determines which vulnerabilities, secrets, a
 
 ## Requirements
 
-- Python 3.10, 3.11, 3.12, 3.13, or 3.14
-- Linux (x86_64 or ARM64) or macOS (Intel or Apple Silicon)
+- Python 3.11, 3.12, 3.13, or 3.14
+- Linux (x86_64 or ARM64) or macOS (Apple Silicon or Intel)
 - Internet access for CVE database updates
 
 ---
