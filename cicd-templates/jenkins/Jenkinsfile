@@ -1,23 +1,18 @@
 // REACHABLE Universal Security Scan — Jenkinsfile
 //
-// Single agent, single job. REACHABLE runs all scanners concurrently
-// inside one process — no distributed coordination needed.
-//
-// Works on: any Jenkins agent (managed or self-hosted).
-// Typical runtime: 60–90 seconds.
+// Single stage. REACHABLE runs all scanners concurrently in one process.
+// Works on any Jenkins agent — no shared volumes, no coordination needed.
 //
 // ── Setup ─────────────────────────────────────────────────────────────
 //   1. Create a Pipeline job → Script Path: jenkins/Jenkinsfile
-//   2. Optionally override REACHABLE_DIST_REPO, REACHABLE_VERSION,
-//      FAIL_THRESHOLD as Jenkins environment variables or via repo vars.
-//   3. For a specific agent: replace `agent any` with
-//      `agent { label 'your-label' }`
+//   2. Optionally set REACHABLE_DIST_REPO, REACHABLE_VERSION, FAIL_THRESHOLD
+//      as Jenkins environment variables or repo vars to override defaults.
 //
 // Exit codes: 0 = clean, 2 = findings above threshold, 1 = scan error
 
 pipeline {
 
-    agent any  // Replace: agent { label 'reach-scanner' }
+    agent any  // Replace with: agent { label 'your-runner' }
 
     options {
         timestamps()
@@ -38,69 +33,25 @@ pipeline {
                 sh '''
                     ARGS=""
                     [ -n "${REACHABLE_VERSION}" ] && ARGS="--version ${REACHABLE_VERSION}"
-                    if ! curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS; then
-                        echo "ERROR: install.sh failed"
-                        exit 1
-                    fi
-                    command -v reachctl >/dev/null 2>&1 || { echo "ERROR: reachctl not found after install"; exit 1; }
+                    curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS
                     reachctl version
                 '''
             }
         }
 
-        stage('Init') {
-            steps {
-                script {
-                    def raw = sh(script: 'reachctl pipeline init . --json 2>&1', returnStdout: true).trim()
-                    def json = raw.split('\n').findAll { it.trim().startsWith('{') }.last() ?: ''
-                    if (!json) {
-                        echo "ERROR: No JSON from pipeline init. Output:\n${raw}"
-                        error('pipeline init produced no JSON')
-                    }
-                    writeFile file: '.reach-init.json', text: json
-                    def sessionDir = sh(script: '''python3 - <<'PYEOF'
-import sys, json
-try:
-    with open('.reach-init.json') as f: d = json.load(f)
-    v = d.get('session_dir', '')
-    if not v: raise ValueError('session_dir empty')
-    print(v)
-except Exception as e:
-    sys.stderr.write(str(e) + '\n'); sys.exit(1)
-PYEOF''', returnStdout: true).trim()
-                    if (!sessionDir) error('session_dir empty after parse')
-                    env.SESSION_DIR = sessionDir
-                    echo "Session: ${env.SESSION_DIR}"
-                }
-            }
-        }
-
         stage('Scan') {
             steps {
-                sh 'reachctl pipeline step scan --session "$SESSION_DIR"'
-            }
-        }
-
-        stage('Analyze (concurrent)') {
-            steps {
-                sh 'reachctl pipeline step secrets malware health iac ai dlp --session "$SESSION_DIR"'
-            }
-        }
-
-        stage('Finalize') {
-            steps {
                 script {
-                    def result = sh(script: '''
-                        set +e
-                        reachctl pipeline finalize --session "$SESSION_DIR" --fail-on "$FAIL_THRESHOLD"
-                        echo "EXIT:$?"
-                    ''', returnStdout: true).trim()
-                    def exitCode = (result =~ /EXIT:(\d+)/)[0][1]
-                    env.FINALIZE_EXIT = exitCode
+                    def result = sh(
+                        script: 'reachctl scan . --ci --fail-on "$FAIL_THRESHOLD" --sarif reachable.sarif; echo $?',
+                        returnStdout: true
+                    ).trim()
+                    def exitCode = result.split('\n').last().trim()
+                    env.SCAN_EXIT = exitCode
                     if (exitCode == '2') {
                         unstable("REACHABLE: findings above threshold '${env.FAIL_THRESHOLD}'")
                     } else if (exitCode != '0') {
-                        error("REACHABLE: finalize failed (exit ${exitCode})")
+                        error("REACHABLE: scan failed (exit ${exitCode})")
                     }
                 }
             }
@@ -109,23 +60,16 @@ PYEOF''', returnStdout: true).trim()
 
     post {
         always {
-            sh '''
-                mkdir -p build/dashboard
-                find ${HOME}/.reachable/scans -type d -name dashboard \
-                    -exec cp -r {}/ build/dashboard/ \\; 2>/dev/null || true
-                find ${HOME}/.reachable/scans -name "reachable.sarif" \
-                    -exec cp {} build/ \\; 2>/dev/null || true
-            '''
-            archiveArtifacts artifacts: 'build/dashboard/**,build/reachable.sarif', allowEmptyArchive: true
-            script {
-                def status = env.FINALIZE_EXIT == '0' ? '✅ Clean'
-                           : env.FINALIZE_EXIT == '2' ? '⚠ Findings above threshold'
-                                                      : '❌ Scan error'
-                currentBuild.description = "${status} | ${env.SESSION_DIR ?: 'unknown session'}"
-            }
+            sh "mkdir -p build/dashboard && find \${HOME}/.reachable/scans -type d -name dashboard -exec cp -r {}/ build/dashboard/ \\; 2>/dev/null || true"
+            archiveArtifacts artifacts: 'build/dashboard/**', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'reachable.sarif', allowEmptyArchive: true
+            def status = env.SCAN_EXIT == '0' ? '✅ Clean'
+                       : env.SCAN_EXIT == '2' ? '⚠ Findings'
+                                              : '❌ Error'
+            currentBuild.description = status
         }
-        success  { echo 'REACHABLE: clean' }
+        success  { echo "REACHABLE: clean" }
         unstable { echo "REACHABLE: findings above threshold (${FAIL_THRESHOLD})" }
-        failure  { echo 'REACHABLE: scan error — check logs' }
+        failure  { echo "REACHABLE: scan error — check logs" }
     }
 }

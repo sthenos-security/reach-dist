@@ -1,37 +1,39 @@
 # REACHABLE CI/CD Templates
 
-Copy the template for your CI platform into your repo. No configuration required to get started.
+One command. All scanners run concurrently in a single process. No shared volumes, no coordination.
 
-## Recommended: Universal Pipeline
+```
+reachctl scan . --ci --fail-on high --sarif results.sarif
+```
 
-One job, one runner, all scanners run concurrently inside REACHABLE.
-Works on managed runners and self-hosted runners without any changes.
-**Typical runtime: 60–90 seconds.**
+## Files
 
-| Platform | File | Copy to |
-|----------|------|---------|
-| GitHub Actions | `github-actions/reachable.yml` | `.github/workflows/reachable.yml` |
-| GitLab CI | `gitlab/.gitlab-ci.yml` | `.gitlab-ci.yml` |
-| Jenkins | `jenkins/Jenkinsfile` | `jenkins/Jenkinsfile` |
+| Platform | File |
+|---|---|
+| GitHub Actions | `github-actions/reachable.yml` |
+| GitLab CI | `gitlab/.gitlab-ci.yml` |
+| Jenkins | `jenkins/Jenkinsfile` |
 
-## Variables
+## Usage
 
-All variables are optional — defaults work out of the box.
+Copy the file for your platform into your repo and set optional variables to override defaults.
+
+All configs support the same variables:
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+|---|---|---|
 | `REACHABLE_DIST_REPO` | `sthenos-security/reach-dist` | Distribution repo |
-| `REACHABLE_VERSION` | latest | Pin a specific version |
-| `FAIL_THRESHOLD` | `high` | Gate threshold: `critical` \| `high` \| `medium` \| `any` \| `none` |
-| `RUNNER_LABEL` | `ubuntu-latest` | Runner label (GitHub/Jenkins only) |
+| `REACHABLE_VERSION` | _(latest)_ | Pin a specific version |
+| `FAIL_THRESHOLD` | `high` | `critical\|high\|medium\|any\|none` |
 
-## Self-Hosted Runners
+**GitHub Actions:** set as repo variables (Settings → Variables).
+**GitLab CI:** set as CI/CD variables (Project → Settings → CI/CD → Variables).
+**Jenkins:** set as environment variables or override in the Jenkinsfile.
 
-**GitHub Actions:** Set the `RUNNER_LABEL` repo variable to your runner label.
+## Exit codes
 
-**GitLab CI:** Uncomment the `tags` block in the template and set `RUNNER_TAG`.
-
-**Jenkins:** Replace `agent any` with `agent { label 'your-label' }`.
-
-No shared volumes, no network mounts, no distributed coordination needed —
-REACHABLE handles concurrency internally on a single runner.
+| Code | Meaning |
+|---|---|
+| `0` | Clean |
+| `2` | Findings above threshold |
+| `1` | Scan error |

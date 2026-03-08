@@ -1,7 +1,7 @@
 # REACHABLE Universal Security Scan — GitLab CI
 #
 # Single job — no shared volumes, no multi-runner coordination.
-# REACHABLE runs all scanners concurrently inside one process on one runner.
+# REACHABLE runs all scanners concurrently in one process on one runner.
 #
 # Works on: GitLab SaaS (managed runners) AND self-hosted runners.
 # Typical runtime: 60–90 seconds.
@@ -28,7 +28,6 @@ variables:
 
 stages:
   - scan
-  - finalize
 
 default:
   image: python:${PYTHON_VERSION}-slim
@@ -46,7 +45,6 @@ default:
         echo "ERROR: install.sh failed — check REACHABLE_DIST_REPO and REACHABLE_VERSION"
         exit 1
       fi
-      command -v reachctl >/dev/null 2>&1 || { echo "ERROR: reachctl not found after install"; exit 1; }
       reachctl version
 
 workflow:
@@ -56,60 +54,17 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
 
-# ── Scan: init + all analyzers concurrent ────────────────────────────
-reachable-scan:
+reachable:
   stage: scan
-  script:
-    - |
-      RAW=$(reachctl pipeline init "${CI_PROJECT_DIR}" --json 2>&1)
-      JSON=$(echo "$RAW" | grep '^{' | tail -1)
-      if [ -z "$JSON" ]; then
-        echo "ERROR: No JSON from pipeline init. Output: $RAW"
-        exit 1
-      fi
-      SESSION_DIR=$(echo "$JSON" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    v = d['session_dir']
-    if not v: raise ValueError('session_dir empty')
-    print(v)
-except Exception as e:
-    sys.stderr.write(str(e) + '\n'); sys.exit(1)
-") || { echo "ERROR: Failed to parse session_dir"; exit 1; }
-      echo "SESSION_DIR=${SESSION_DIR}" > .reachable-session
-      echo "Session: ${SESSION_DIR}"
-    - source .reachable-session
-    - reachctl pipeline step scan --session "$SESSION_DIR"
-    - reachctl pipeline step secrets malware health iac ai dlp --session "$SESSION_DIR"
-  artifacts:
-    paths:
-      - .reachable-session
-    expire_in: 1 hour
-
-# ── Finalize: reachability analysis + dashboard + threshold gate ──────
-reachable-finalize:
-  stage: finalize
-  needs: [reachable-scan]
   allow_failure:
     exit_codes: 2
   script:
-    - source .reachable-session
-    - |
-      set +e
-      reachctl pipeline finalize --session "$SESSION_DIR" --fail-on "$FAIL_THRESHOLD"
-      FINALIZE_EXIT=$?
-      mkdir -p build
-      find ~/.reachable/scans -type d -name dashboard \
-        -exec cp -r {}/ build/dashboard/ \; 2>/dev/null || true
-      find ~/.reachable/scans -name "reachable.sarif" \
-        -exec cp {} build/reachable.sarif \; 2>/dev/null || true
-      exit $FINALIZE_EXIT
+    - reachctl scan . --ci --fail-on "$FAIL_THRESHOLD" --sarif reachable.sarif
   artifacts:
     when: always
     expire_in: 30 days
     paths:
-      - build/dashboard/
-      - build/reachable.sarif
+      - ~/.reachable/scans/**/dashboard/
+      - reachable.sarif
     reports:
-      sast: build/reachable.sarif
+      sast: reachable.sarif

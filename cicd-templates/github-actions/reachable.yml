@@ -1,16 +1,16 @@
 # REACHABLE Universal Security Scan
 #
-# Single job — no shared volumes, no multi-VM coordination, no artifact passing.
-# REACHABLE runs all scanners concurrently inside one process on one runner.
+# One job. One command. Works on GitHub-managed AND self-hosted runners.
+# REACHABLE runs all scanners concurrently in a single process — no multi-VM
+# coordination, no shared volumes, no artifact passing between jobs.
 #
-# Works on: GitHub-managed runners AND self-hosted runners (set RUNNER_LABEL).
-# Typical runtime: 60–90 seconds on a standard 2-core managed runner.
+# Typical runtime: 60–90s on a 2-core managed runner.
 #
 # ── Repo variables (all optional) ────────────────────────────────────
 #   REACHABLE_DIST_REPO  — dist repo  (default: sthenos-security/reach-dist)
 #   REACHABLE_VERSION    — pin version (default: latest)
 #   FAIL_THRESHOLD       — critical | high | medium | any | none  (default: high)
-#   RUNNER_LABEL         — runner label for self-hosted  (default: ubuntu-latest)
+#   RUNNER_LABEL         — self-hosted runner label  (default: ubuntu-latest)
 
 name: REACHABLE Security Scan
 
@@ -43,51 +43,11 @@ jobs:
         run: |
           ARGS=""
           [[ -n "$REACHABLE_VERSION" ]] && ARGS="--version $REACHABLE_VERSION"
-          if ! curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS; then
-            echo "::error::install.sh failed — check REACHABLE_DIST_REPO and REACHABLE_VERSION"
-            exit 1
-          fi
-          command -v reachctl &>/dev/null || { echo "::error::reachctl not found after install"; exit 1; }
+          curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS
           reachctl version
 
-      - name: Initialize Pipeline
-        run: |
-          RAW=$(reachctl pipeline init . --json 2>&1)
-          JSON=$(echo "$RAW" | grep '^{' | tail -1)
-          if [[ -z "$JSON" ]]; then
-            echo "::error::No JSON from pipeline init. Output: $RAW"
-            exit 1
-          fi
-          SESSION_DIR=$(echo "$JSON" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    v = d['session_dir']
-    if not v: raise ValueError('session_dir empty')
-    print(v)
-except Exception as e:
-    sys.stderr.write(str(e) + '\n'); sys.exit(1)
-") || { echo "::error::Failed to parse session_dir"; exit 1; }
-          echo "SESSION_DIR=${SESSION_DIR}" >> "$GITHUB_ENV"
-          echo "Session: ${SESSION_DIR}"
-
       - name: Scan
-        run: reachctl pipeline step scan --session "$SESSION_DIR"
-
-      - name: Analyze (concurrent)
-        run: reachctl pipeline step secrets malware health iac ai dlp --session "$SESSION_DIR"
-
-      - name: Finalize
-        id: finalize
-        continue-on-error: true
-        run: |
-          set +e
-          reachctl pipeline finalize --session "$SESSION_DIR" --fail-on "$FAIL_THRESHOLD"
-          EXIT=$?
-          echo "finalize_exit=${EXIT}" >> "$GITHUB_OUTPUT"
-          [[ $EXIT -eq 2 ]] && echo "::warning::Findings above threshold '${FAIL_THRESHOLD}'"
-          [[ $EXIT -eq 1 ]] && echo "::error::Finalize failed"
-          exit $EXIT
+        run: reachctl scan . --ci --fail-on "$FAIL_THRESHOLD" --sarif reachable.sarif
 
       - name: Upload Dashboard
         if: always()
@@ -101,26 +61,5 @@ except Exception as e:
         if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: ~/.reachable/scans/
+          sarif_file: reachable.sarif
         continue-on-error: true
-
-      - name: Summary
-        if: always()
-        run: |
-          EXIT="${{ steps.finalize.outputs.finalize_exit }}"
-          case "$EXIT" in
-            0) STATUS="✅ Clean" ;;
-            2) STATUS="⚠️ Findings above threshold (${FAIL_THRESHOLD})" ;;
-            *) STATUS="❌ Error (exit ${EXIT})" ;;
-          esac
-          {
-            echo "## 🔒 REACHABLE Security Scan"
-            echo "**Status:** ${STATUS} | **Session:** ${SESSION_DIR}"
-            echo "Scanners: CVE · Secrets/CWE · Malware · Health · IaC · AI/LLM · DLP/PII"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Enforce Threshold
-        if: always()
-        run: |
-          EXIT="${{ steps.finalize.outputs.finalize_exit }}"
-          [[ "$EXIT" == "1" || "$EXIT" == "2" ]] && exit "$EXIT" || exit 0
