@@ -41,9 +41,9 @@ jobs:
 
       - name: Install REACHABLE
         run: |
-          ARGS=""
-          [[ -n "$REACHABLE_VERSION" ]] && ARGS="--version $REACHABLE_VERSION"
-          curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS
+          ARGS=()
+          [[ -n "$REACHABLE_VERSION" ]] && ARGS=(--version "$REACHABLE_VERSION")
+          curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- "${ARGS[@]}"
           reachctl version
 
       - name: Scan
