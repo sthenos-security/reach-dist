@@ -1,18 +1,21 @@
-# REACHABLE Security Scan — GitLab CI
+# REACHABLE Universal Security Scan — GitLab CI
 #
-# Three deployment models:
+# Single job — no shared volumes, no multi-runner coordination.
+# REACHABLE runs all scanners concurrently inside one process on one runner.
 #
-#   A) GitLab SaaS (managed runners) — serial, state via artifacts
-#   B) Self-managed runners with shared volume — set REACHABLE_HOME
-#   C) GitLab + S3 — set REACH_S3_BUCKET / REACH_S3_REGION / AWS credentials
+# Works on: GitLab SaaS (managed runners) AND self-hosted runners.
+# Typical runtime: 60–90 seconds.
 #
 # ── Variables ─────────────────────────────────────────────────────────
 # Set in: Project → Settings → CI/CD → Variables
 #
-#   REACHABLE_DIST_REPO  — dist repo (default: sthenos-security/reach-dist)
-#   REACHABLE_VERSION    — pin a version (default: latest)
-#   FAIL_THRESHOLD       — critical | high | medium | any | none (default: high)
-#   REACHABLE_HOME       — shared mount for self-hosted volume model (optional)
+#   REACHABLE_DIST_REPO  — dist repo  (default: sthenos-security/reach-dist)
+#   REACHABLE_VERSION    — pin version (default: latest)
+#   FAIL_THRESHOLD       — critical | high | medium | any | none  (default: high)
+#
+# ── Self-hosted runners ───────────────────────────────────────────────
+# Uncomment the tags block under 'default' and set RUNNER_TAG to match
+# your runner label. No other changes needed.
 #
 # ── Exit codes ────────────────────────────────────────────────────────
 #   0 = clean, 2 = findings above threshold, 1 = scan error
@@ -22,23 +25,17 @@ variables:
   REACHABLE_VERSION: ""
   FAIL_THRESHOLD: "high"
   PYTHON_VERSION: "3.11"
-  REACH_STATE_DIR: "$CI_PROJECT_DIR/.reachable-state"
 
 stages:
-  - install
-  - init
   - scan
-  - analyze
   - finalize
 
 default:
   image: python:${PYTHON_VERSION}-slim
 
-  # Runner selection:
-  #   Managed (GitLab SaaS): remove tags block
-  #   Self-managed: set tags to match your runner labels
+  # Self-hosted runners: uncomment and set RUNNER_TAG variable
   # tags:
-  #   - self-hosted
+  #   - $RUNNER_TAG
 
   before_script:
     - apt-get update -qq && apt-get install -qq -y curl git 2>/dev/null | tail -1
@@ -51,7 +48,6 @@ default:
       fi
       command -v reachctl >/dev/null 2>&1 || { echo "ERROR: reachctl not found after install"; exit 1; }
       reachctl version
-    - mkdir -p "${REACH_STATE_DIR}"
 
 workflow:
   rules:
@@ -60,30 +56,15 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
 
-.state_artifact: &state_artifact
-  artifacts:
-    paths:
-      - .reachable-state/
-    expire_in: 2 hours
-    when: always
-
-# ─────────────────────────────────────────────────────────────────────
-install:
-  stage: install
-  script:
-    - reachctl version
-
-# ─────────────────────────────────────────────────────────────────────
-init:
-  stage: init
-  needs: [install]
+# ── Scan: init + all analyzers concurrent ────────────────────────────
+reachable-scan:
+  stage: scan
   script:
     - |
       RAW=$(reachctl pipeline init "${CI_PROJECT_DIR}" --json 2>&1)
       JSON=$(echo "$RAW" | grep '^{' | tail -1)
       if [ -z "$JSON" ]; then
-        echo "ERROR: No JSON output from reachctl pipeline init. Full output:"
-        echo "$RAW"
+        echo "ERROR: No JSON from pipeline init. Output: $RAW"
         exit 1
       fi
       SESSION_DIR=$(echo "$JSON" | python3 -c "
@@ -91,94 +72,37 @@ import sys, json
 try:
     d = json.load(sys.stdin)
     v = d['session_dir']
-    if not v: raise ValueError('session_dir is empty')
+    if not v: raise ValueError('session_dir empty')
     print(v)
 except Exception as e:
-    sys.stderr.write('Failed to parse session_dir: ' + str(e) + '
-')
-    sys.exit(1)
-") || { echo "ERROR: Failed to parse session_dir — see above"; exit 1; }
-      echo "SESSION_DIR=${SESSION_DIR}" > "${REACH_STATE_DIR}/.session_env"
+    sys.stderr.write(str(e) + '\n'); sys.exit(1)
+") || { echo "ERROR: Failed to parse session_dir"; exit 1; }
+      echo "SESSION_DIR=${SESSION_DIR}" > .reachable-session
       echo "Session: ${SESSION_DIR}"
-  <<: *state_artifact
-
-# ─────────────────────────────────────────────────────────────────────
-scan:
-  stage: scan
-  needs: [init]
-  script:
-    - source "${REACH_STATE_DIR}/.session_env"
+    - source .reachable-session
     - reachctl pipeline step scan --session "$SESSION_DIR"
-  <<: *state_artifact
+    - reachctl pipeline step secrets malware health iac ai dlp --session "$SESSION_DIR"
+  artifacts:
+    paths:
+      - .reachable-session
+    expire_in: 1 hour
 
-# ─────────────────────────────────────────────────────────────────────
-# secrets/iac/ai/dlp — no scan dependency
-# malware/health      — need scan (SBOM in repo.db)
-# ─────────────────────────────────────────────────────────────────────
-scan-secrets:
-  stage: analyze
-  needs: [scan]
-  script:
-    - source "${REACH_STATE_DIR}/.session_env"
-    - reachctl pipeline step secrets --session "$SESSION_DIR"
-  <<: *state_artifact
-
-malware:
-  stage: analyze
-  needs: [scan]
-  script:
-    - source "${REACH_STATE_DIR}/.session_env"
-    - reachctl pipeline step malware --session "$SESSION_DIR"
-  <<: *state_artifact
-
-health:
-  stage: analyze
-  needs: [scan]
-  script:
-    - source "${REACH_STATE_DIR}/.session_env"
-    - reachctl pipeline step health --session "$SESSION_DIR"
-  <<: *state_artifact
-
-iac:
-  stage: analyze
-  needs: [init]
-  script:
-    - source "${REACH_STATE_DIR}/.session_env"
-    - reachctl pipeline step iac --session "$SESSION_DIR"
-  <<: *state_artifact
-
-ai-security:
-  stage: analyze
-  needs: [init]
-  script:
-    - source "${REACH_STATE_DIR}/.session_env"
-    - reachctl pipeline step ai --session "$SESSION_DIR"
-  <<: *state_artifact
-
-dlp-pii:
-  stage: analyze
-  needs: [init]
-  script:
-    - source "${REACH_STATE_DIR}/.session_env"
-    - reachctl pipeline step dlp --session "$SESSION_DIR"
-  <<: *state_artifact
-
-# ─────────────────────────────────────────────────────────────────────
-finalize:
+# ── Finalize: reachability analysis + dashboard + threshold gate ──────
+reachable-finalize:
   stage: finalize
-  needs: [scan-secrets, malware, health, iac, ai-security, dlp-pii]
+  needs: [reachable-scan]
   allow_failure:
     exit_codes: 2
   script:
-    - source "${REACH_STATE_DIR}/.session_env"
+    - source .reachable-session
     - |
       set +e
       reachctl pipeline finalize --session "$SESSION_DIR" --fail-on "$FAIL_THRESHOLD"
       FINALIZE_EXIT=$?
       mkdir -p build
-      find "${REACH_STATE_DIR}" ~/.reachable/scans -type d -name dashboard \
+      find ~/.reachable/scans -type d -name dashboard \
         -exec cp -r {}/ build/dashboard/ \; 2>/dev/null || true
-      find "${REACH_STATE_DIR}" ~/.reachable/scans -name "reachable.sarif" \
+      find ~/.reachable/scans -name "reachable.sarif" \
         -exec cp {} build/reachable.sarif \; 2>/dev/null || true
       exit $FINALIZE_EXIT
   artifacts:
