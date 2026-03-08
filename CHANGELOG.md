@@ -2,6 +2,15 @@
 
 ---
 
+## [1.0.0b29]
+
+- CLI: `reachctl selftest` — faster, no longer runs full scan infrastructure; validates install, tools on PATH, and DB access
+- CLI: `reachctl selftest --unit / --integration / --full` flags unchanged
+- Build: release pipeline hardened — per-job timeouts, automatic cancellation of duplicate runs, immediate failure propagation across build matrix
+- Build: workflow linting added as mandatory gate before any build starts
+
+---
+
 ## [1.0.0b28]
 
 - CI/CD: Universal single-command pipeline for GitHub Actions, GitLab CI, and Jenkins — replaces all multi-job reference variants
