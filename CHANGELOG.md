@@ -2,6 +2,31 @@
 
 ---
 
+## [1.0.0b28]
+
+- CI/CD: Universal single-command pipeline for GitHub Actions, GitLab CI, and Jenkins — replaces all multi-job reference variants
+- CI/CD: `--ci` flag enables quiet output, structured exit codes, and auto-gates on `--fail-on critical`
+- CI/CD: `--no-dashboard` flag for faster CI scans when dashboard artifact is not needed
+- CI/CD: Docker scan consolidates to single `docker-compose.yml` with `--no-dashboard` opt-in via `run.sh`
+- Dashboard: Fixed `reachability_coverage_pct` showing zero — join timing issue in `getReachabilityCoverage()`
+- Dashboard: Fixed 31+ bugs across `main.js`, `tabs.js`, `owasp-cards.js`, `dashboard-styles.css` — GRC framework inferral, CWE hex hash display, CSV export filters, OWASP card heights, counter/table mismatches, color palette violations
+- Dashboard: SLA logic — unfixable CVEs show `NO FIX`, unknown severity shows `ASSESS`; fix status filter added
+- Dashboard: Config/IaC terminology unified to `Config` throughout UI and DB
+- Dashboard: Removed INFO from severity filter; cleaned up risk filter labels
+- Dashboard: Fixed `_DASHBOARD_HTML_READ_LIMIT` constant (bumped to 768 KB)
+- Dashboard: Fixed trends chart DLP race condition (`complete_scan()` called before DLP storage)
+- Supply chain: Phase 5 unresolved package tracking with fuzzy matching, DB operations, and CLI aliases
+- Supply chain: Fixed `_to_advisory_dicts()` dropping `is_direct` field; fixed `toggleGroup` badge hardcoding
+- Reachability: Fixed write-path ban for v1 `call_path` fields (T-CG28); fixed secret reachability downgrade bug (T-CG29); fixed `callable_functions` multi-parent BFS crash (T-CG30)
+- Scanning: Upgraded Syft (v1.42.1) and Grype (v0.109.0) with version-mismatch detection in `preflight.py`
+- CLI: `reachctl selftest` Phase 4 — `test_cli_comprehensive.py` wired in (893 passed, 0 failed)
+- CLI: Fixed stale `template-shell-compiled.html` and `TestSemgrepRules` pyyaml guard
+- CLI: Emoji removed from 157 Python source files
+- Distribution: Consolidated CI/CD into `reach-dist-cicd`; removed `reach-cicd`
+- Distribution: Cosign keyless signing with GitHub OIDC on all wheel releases
+
+---
+
 ## [1.0.0b17]
 
 - Release integrity: SHA-256 checksum and Sigstore/cosign signature verification on every install
