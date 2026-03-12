@@ -4,10 +4,17 @@
 
 ## [1.0.0b29]
 
+- Malware: Fixed empty `package_name` on 288 semgrep malware findings — normalizer now derives package from file path relative to repo root (22 distinct packages detected)
+- Malware: Sandbox `packages_tested` metric now flows from raw scanner output through to dashboard (`sandbox_packages_tested=190` verified end-to-end)
+- Malware: Sandbox findings fully ingested into DB (42 findings, 14 distinct malicious packages)
+- Malware: 4-counter metrics verified — static_confirmed/suspicious + dynamic_confirmed/suspicious all reconciled against DB
+- Dashboard: Sandbox metrics object added to data.json (packages_tested, malicious, suspicious, clean, verdict)
+- Pipeline: Full 4-layer audit verified (raw → DB → data.json → dashboard) — all 7 signal types reconcile exactly
 - CLI: `reachctl selftest` — faster, no longer runs full scan infrastructure; validates install, tools on PATH, and DB access
 - CLI: `reachctl selftest --unit / --integration / --full` flags unchanged
 - Build: release pipeline hardened — per-job timeouts, automatic cancellation of duplicate runs, immediate failure propagation across build matrix
 - Build: workflow linting added as mandatory gate before any build starts
+- **Enzo** (experimental): AI-assisted remediation engine included as preview — not fully tested, full release targeted for b30+
 
 ---
 
