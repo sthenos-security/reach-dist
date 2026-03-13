@@ -2,6 +2,17 @@
 
 ---
 
+## [1.0.0b31]
+
+- Build: Fixed artifact upload path bug (`.cython-cache/` trailing slash → `.cython-cache`) — root cause of transpile→upload failure in b30
+- Build: Simplified artifact name (`cython-c-files` instead of tag-interpolated name)
+- Build: Added debug step to verify cache contents before upload
+- Build: Added `if: needs.transpile.result == 'success'` guard on build-wheels matrix
+- Build: Added `cache: 'pip'` to setup-python — saves ~30-60s per matrix job
+- Build: Set `compression-level: 0` on C cache artifact upload — faster upload/download across 12 jobs
+
+---
+
 ## [1.0.0b30]
 
 - All b29 fixes plus:
