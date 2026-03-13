@@ -1,6 +1,6 @@
 # REACHABLE by Sthenos Security
 
-Your dependencies have hundreds of known vulnerabilities. Most will never be exploited. REACHABLE performs deep code analysis and tells you exactly which ones are reachable from your running code. Fix what matters, ignore what doesn't.
+REACHABLE performs deep code analysis and tells you exactly which vulnerabilities are reachable from your running code. Fix what matters, ignore what doesn't.
 
 One command. Multi-signal reachability analysis. Full interactive dashboard in 90 seconds.
 
