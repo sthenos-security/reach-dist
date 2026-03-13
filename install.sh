@@ -225,25 +225,19 @@ detect_environment() {
     PY_MAJOR=$(echo $PY_VERSION | cut -d. -f1)
     PY_MINOR=$(echo $PY_VERSION | cut -d. -f2)
     
-    if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 10 ]]; then
-        print_error "Python 3.10+ required (found $PY_VERSION)"
+    if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ]]; then
+        print_error "Python 3.11+ required (found $PY_VERSION)"
         exit 1
     fi
     
     PY_TAG="cp${PY_VERSION//./}"
     
     # Platform tag for wheel
-    # Note: macOS uses universal2 (supports both Intel and ARM)
-    # Linux uses simple linux_* tags (not manylinux)
+    # macOS: universal2 fat binary (ARM64 + Intel)
+    # Linux: native architecture tags
     if [[ "$OS" == "darwin" ]]; then
-        # macOS universal2 wheels - platform varies by Python version
-        if [[ "$PY_MINOR" -ge 14 ]]; then
-            PLATFORM_TAG="macosx_10_15_universal2"
-        elif [[ "$PY_MINOR" -ge 12 ]]; then
-            PLATFORM_TAG="macosx_10_13_universal2"
-        else
-            PLATFORM_TAG="macosx_10_9_universal2"
-        fi
+        # macOS universal2 wheels (ARM64 + Intel fat binary)
+        PLATFORM_TAG="macosx_11_0_universal2"
     else
         # Linux
         if [[ "$ARCH" == "aarch64" ]]; then
