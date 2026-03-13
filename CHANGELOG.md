@@ -2,6 +2,18 @@
 
 ---
 
+## [1.0.0b30]
+
+- All b29 fixes plus:
+- Build: removed cleanup-artifacts job (was deleting cross-run artifacts, breaking re-tags)
+- Build: concurrency cancel-in-progress disabled (prevents race conditions)
+- UX: heartbeat progress for clone, sandbox, and reachability analysis (no more silent 15-30s gaps)
+- Fix: Python 3.14.3 HTTP finalizer noise suppressed (health collector)
+- Fix: Cython build skips enzo/tests + enzo/docs (faster transpile)
+- Fix: verify_wheel respects KEEP_AS_PY for enzo entry points
+
+---
+
 ## [1.0.0b29]
 
 - Malware: Fixed empty `package_name` on 288 semgrep malware findings — normalizer now derives package from file path relative to repo root (22 distinct packages detected)

@@ -1,0 +1,107 @@
+REACHABLE™ PROPRIETARY SOFTWARE LICENSE
+========================================
+
+Copyright © 2026 Sthenos Security. All rights reserved.
+
+Created by Alain Dazzi | info@sthenosec.com
+
+NOTICE: This software and its documentation are proprietary to Sthenos Security
+("Licensor") and are protected by copyright law and international treaties.
+Unauthorized reproduction, distribution, or use of this software, in whole
+or in part, is strictly prohibited and may result in civil and criminal
+penalties.
+
+1. EVALUATION LICENSE
+---------------------
+Subject to the terms of this License, Licensor grants you a limited,
+non-exclusive, non-transferable, revocable license to use this software
+solely for internal evaluation purposes for a period of thirty (30) days
+from the date of first access ("Evaluation Period").
+
+2. RESTRICTIONS
+---------------
+You may NOT:
+  a) Use this software in production environments without a separate
+     commercial license agreement;
+  b) Copy, modify, adapt, translate, or create derivative works of
+     the software;
+  c) Reverse engineer, disassemble, decompile, or otherwise attempt
+     to derive the source code of the software;
+  d) Distribute, sublicense, lease, rent, loan, or otherwise transfer
+     the software to any third party;
+  e) Remove, alter, or obscure any proprietary notices, labels, or
+     marks on the software;
+  f) Use the software to develop competing products or services;
+  g) Use the software for any purpose other than evaluation without
+     prior written consent from Licensor.
+
+3. INTELLECTUAL PROPERTY
+------------------------
+This software contains proprietary algorithms, methods, and trade secrets,
+including but not limited to:
+  - Multi-signal security correlation engine
+  - Reachability analysis algorithms
+  - Risk assessment and verdict computation methods
+  - Compliance mapping frameworks
+  - Distribution and installation infrastructure
+
+All intellectual property rights in the software, including patents,
+copyrights, trade secrets, and trademarks, are and shall remain the
+exclusive property of Licensor.
+
+4. CONFIDENTIALITY
+------------------
+You acknowledge that the software contains confidential and proprietary
+information. You agree to maintain the confidentiality of the software
+and not to disclose any part of it to third parties without prior
+written consent from Licensor.
+
+5. NO WARRANTY
+--------------
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. LICENSOR DOES NOT
+WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE OR UNINTERRUPTED.
+
+6. LIMITATION OF LIABILITY
+--------------------------
+IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED
+TO LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR IN CONNECTION WITH
+THIS LICENSE OR THE USE OF THE SOFTWARE, EVEN IF LICENSOR HAS BEEN
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+7. TERMINATION
+--------------
+This License is effective until terminated. Licensor may terminate this
+License immediately upon written notice if you breach any provision of
+this License. Upon termination, you must destroy all copies of the
+software in your possession.
+
+8. COMMERCIAL LICENSING
+-----------------------
+For production use, enterprise deployment, or extended evaluation,
+please contact:
+
+  Sthenos Security
+  Email: info@sthenosec.com
+
+9. GOVERNING LAW
+----------------
+This License shall be governed by and construed in accordance with the
+laws of the State of California, United States, without regard to its
+conflict of law provisions.
+
+10. ENTIRE AGREEMENT
+--------------------
+This License constitutes the entire agreement between you and Licensor
+regarding the software and supersedes all prior agreements and
+understandings, whether written or oral.
+
+By using this software, you acknowledge that you have read this License,
+understand it, and agree to be bound by its terms and conditions.
+
+================================================================================
+REACHABLE is a trademark of Sthenos Security.
+Patent Pending.
+================================================================================
