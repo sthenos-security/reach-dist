@@ -6,19 +6,17 @@ One command. All scanners run concurrently in a single process. No shared volume
 reachctl scan . --ci --fail-on high --sarif results.sarif
 ```
 
-## Files
+## Templates
 
-| Platform | File |
-|---|---|
-| GitHub Actions | `github-actions/reachable.yml` |
-| GitLab CI | `gitlab/reachable.gitlab-ci.yml` |
-| Jenkins | `jenkins/Jenkinsfile` |
+| Platform | File | Copy to |
+|---|---|---|
+| GitHub Actions | `github-actions.yml` | `.github/workflows/reachable.yml` |
+| GitLab CI | `gitlab-ci.yml` | `.gitlab-ci.yml` (repo root) |
+| Jenkins | `Jenkinsfile` | `Jenkinsfile` (repo root) |
 
-## Usage
+## Variables
 
-Copy the file for your platform into your repo and set optional variables to override defaults.
-
-All configs support the same variables:
+All templates support the same configuration:
 
 | Variable | Default | Description |
 |---|---|---|

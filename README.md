@@ -1,6 +1,6 @@
 # REACHABLE by Sthenos Security
 
-Most security scanners drown you in CVEs you'll never fix. REACHABLE cuts through the noise — it maps your call graph, traces data flow, and tells you exactly which vulnerabilities are reachable from your running code. Everything else gets deprioritized so your team fixes what actually matters.
+Traditional AppSec tooling drowns you in CVEs you'll never fix. REACHABLE cuts through the noise — it maps your call graph, traces data flow, and tells you exactly which vulnerabilities are reachable from your running code. Everything else gets deprioritized so your team fixes what actually matters.
 
 One command. Seven concurrent scanners. Full interactive dashboard in 90 seconds.
 
@@ -37,13 +37,9 @@ REACHABLE performs multi-signal reachability analysis across your entire applica
 
 ## Supported Languages
 
-**Full reachability analysis** (call graph tracing + all scanners):
+Python, JavaScript/TypeScript, Go, Java
 
-Python, JavaScript, TypeScript, Go, Java
-
-**Dependency & vulnerability scanning** (CVE, SBOM, secrets, IaC — reachability reported as UNKNOWN):
-
-Rust, Ruby, PHP, C#/.NET, C/C++, Swift, Kotlin, Scala, and 30+ additional ecosystems via SBOM.
+All scanners — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM, DLP — work across these languages. Additional languages and build systems are on the [roadmap](#roadmap).
 
 ---
 
@@ -132,35 +128,17 @@ reachctl --help       # Quick overview
 
 ---
 
-## Enzo — AI Remediation (Preview)
-
-Enzo is REACHABLE's AI remediation engine. It reads scan findings, generates targeted patches, and optionally validates fixes with exploit payloads — all from the CLI.
-
-```bash
-reachctl enzo scan ~/src/myapp          # See what enzo can fix
-reachctl enzo run ~/src/myapp --dry-run # Preview patches without applying
-reachctl enzo run ~/src/myapp           # Apply fixes
-reachctl enzo pentest ~/src/myapp       # Verify fixes with exploit payloads
-```
-
-Runs locally via Ollama (code never leaves your machine) or via Claude API. See `reachctl enzo --help`.
-
-> Enzo is included as a preview in this beta. Full release targeted for a future version.
-
----
-
 ## CI/CD Integration
 
 Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins:
 
-```
-cicd-templates/
-├── github-actions/reachable.yml
-├── gitlab/reachable.gitlab-ci.yml
-└── jenkins/Jenkinsfile
-```
+| Platform | Template | Copy to |
+|---|---|---|
+| GitHub Actions | [`github-actions.yml`](cicd-templates/github-actions.yml) | `.github/workflows/reachable.yml` |
+| GitLab CI | [`gitlab-ci.yml`](cicd-templates/gitlab-ci.yml) | `.gitlab-ci.yml` (repo root) |
+| Jenkins | [`Jenkinsfile`](cicd-templates/Jenkinsfile) | `Jenkinsfile` (repo root) |
 
-Copy the relevant template into your repository. For full documentation and local testing scripts, see [reach-dist-cicd](https://github.com/sthenos-security/reach-dist-cicd).
+For full documentation and local testing scripts, see [reach-dist-cicd](https://github.com/sthenos-security/reach-dist-cicd).
 
 ---
 
@@ -180,7 +158,7 @@ Checksums and signature bundles for all releases are in `wheels/v<version>/`.
 
 Active development. Here's where we're headed:
 
-- **Enzo GA** — AI remediation engine: automated fix generation, validation, and commit. Local (Ollama) and cloud (Claude API) modes.
+- **AI-powered remediation** — Automated fix generation, validation, and commit. Runs locally or via cloud API — code never leaves your machine unless you choose.
 - **RADR** — Runtime Application Detection & Response. Lightweight agent that monitors running workloads and correlates runtime behavior with static scan findings.
 - **Additional languages and build systems** — Expanding call graph reachability analysis to more ecosystems.
 - **Global intelligence cache** — Cross-scan knowledge graph that accelerates repeat scans and shares anonymized threat signals across deployments.

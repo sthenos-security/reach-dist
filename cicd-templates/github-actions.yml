@@ -1,4 +1,5 @@
-# REACHABLE Universal Security Scan
+# Copyright © 2026 Sthenos Security. All rights reserved.
+# REACHABLE Universal Security Scan — GitHub Actions
 #
 # One job. One command. Works on GitHub-managed AND self-hosted runners.
 # REACHABLE runs all scanners concurrently in a single process — no multi-VM
@@ -11,6 +12,9 @@
 #   REACHABLE_VERSION    — pin version (default: latest)
 #   FAIL_THRESHOLD       — critical | high | medium | any | none  (default: high)
 #   RUNNER_LABEL         — self-hosted runner label  (default: ubuntu-latest)
+#
+# ── Exit codes ────────────────────────────────────────────────────────
+#   0 = clean, 2 = findings above threshold, 1 = scan error
 
 name: REACHABLE Security Scan
 

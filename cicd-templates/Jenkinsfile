@@ -1,14 +1,16 @@
+// Copyright © 2026 Sthenos Security. All rights reserved.
 // REACHABLE Universal Security Scan — Jenkinsfile
 //
 // Single stage. REACHABLE runs all scanners concurrently in one process.
 // Works on any Jenkins agent — no shared volumes, no coordination needed.
 //
 // ── Setup ─────────────────────────────────────────────────────────────
-//   1. Create a Pipeline job → Script Path: jenkins/Jenkinsfile
+//   1. Create a Pipeline job → Script Path: Jenkinsfile
 //   2. Optionally set REACHABLE_DIST_REPO, REACHABLE_VERSION, FAIL_THRESHOLD
 //      as Jenkins environment variables or repo vars to override defaults.
 //
-// Exit codes: 0 = clean, 2 = findings above threshold, 1 = scan error
+// ── Exit codes ────────────────────────────────────────────────────────
+//   0 = clean, 2 = findings above threshold, 1 = scan error
 
 pipeline {
 
