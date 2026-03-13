@@ -1,6 +1,6 @@
 # REACHABLE by Sthenos Security
 
-Your dependencies have hundreds of known vulnerabilities. Most will never be exploited. REACHABLE maps your call graph, traces data flow, and tells you exactly which ones are reachable from your running code. Fix what matters, ignore what doesn't.
+Your dependencies have hundreds of known vulnerabilities. Most will never be exploited. REACHABLE performs deep code analysis and tells you exactly which ones are reachable from your running code. Fix what matters, ignore what doesn't.
 
 One command. Multi-signal reachability analysis. Full interactive dashboard in 90 seconds.
 
@@ -11,7 +11,7 @@ One command. Multi-signal reachability analysis. Full interactive dashboard in 9
 REACHABLE performs multi-signal reachability analysis across your entire application stack and delivers results through an interactive, offline HTML dashboard.
 
 **Security Analysis**
-- **CVE / SBOM** — Dependency vulnerabilities correlated with call graph reachability. Know which CVEs your code can actually reach.
+- **CVE / SBOM** — Dependency vulnerabilities with reachability analysis. Know which CVEs your code can actually reach.
 - **CWE** — Code-level weaknesses (injection, auth flaws, crypto misuse) with source-level tracing
 - **Secrets** — Hardcoded credentials, API keys, and tokens with reachability context — is the secret actually used?
 - **Malware** — Static pattern detection + behavioral sandbox analysis. Confirmed vs. suspicious verdicts with package-level attribution.
@@ -160,7 +160,7 @@ Active development. Here's where we're headed:
 
 - **AI-powered remediation** — Automated fix generation, validation, and commit. Runs locally or via cloud API — code never leaves your machine unless you choose.
 - **RADR** — Runtime Application Detection & Response. Lightweight agent that monitors running workloads and correlates runtime behavior with static scan findings.
-- **Additional languages and build systems** — Expanding call graph reachability analysis to more ecosystems.
+- **Additional languages and build systems** — Expanding reachability analysis to more ecosystems.
 - **Global intelligence cache** — Cross-scan knowledge graph that accelerates repeat scans and shares anonymized threat signals across deployments.
 - **Multi-tenant SaaS dashboard** — Centralized visibility across teams, repos, and environments. Role-based access, trend analytics, and policy enforcement.
 
