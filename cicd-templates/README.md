@@ -11,7 +11,7 @@ reachctl scan . --ci --fail-on high --sarif results.sarif
 | Platform | File |
 |---|---|
 | GitHub Actions | `github-actions/reachable.yml` |
-| GitLab CI | `gitlab/.gitlab-ci.yml` |
+| GitLab CI | `gitlab/reachable.gitlab-ci.yml` |
 | Jenkins | `jenkins/Jenkinsfile` |
 
 ## Usage

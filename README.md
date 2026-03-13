@@ -1,21 +1,49 @@
 # REACHABLE by Sthenos Security
 
-Reachability-aware security analysis for your codebase. REACHABLE combines software composition analysis, call graph reachability, and multi-signal correlation to eliminate noise and surface only what actually matters.
+Most security scanners drown you in CVEs you'll never fix. REACHABLE cuts through the noise — it maps your call graph, traces data flow, and tells you exactly which vulnerabilities are reachable from your running code. Everything else gets deprioritized so your team fixes what actually matters.
+
+One command. Seven concurrent scanners. Full interactive dashboard in 90 seconds.
 
 ---
 
-## What It Does
+## What You Get
 
-REACHABLE scans your repository and determines which vulnerabilities, secrets, and security issues are reachable from your application code — not just present in your dependencies.
+REACHABLE performs multi-signal reachability analysis across your entire application stack and delivers results through an interactive, offline HTML dashboard.
 
-**Scanners:**
-- **CVE / SBOM** — Dependency vulnerabilities with reachability analysis
-- **Secrets + CWE** — Hardcoded secrets and code-level weaknesses
-- **Malware** — Malicious package detection
-- **Package Health** — Abandoned, confused, or risky dependencies
-- **IaC** — Kubernetes and Docker security misconfigurations
-- **AI/LLM Security** — OWASP LLM Top 10 and MITRE ATLAS checks
-- **DLP/PII** — Data exposure and privacy risk analysis
+**Security Analysis**
+- **CVE / SBOM** — Dependency vulnerabilities correlated with call graph reachability. Know which CVEs your code can actually reach.
+- **CWE** — Code-level weaknesses (injection, auth flaws, crypto misuse) with source-level tracing
+- **Secrets** — Hardcoded credentials, API keys, and tokens with reachability context — is the secret actually used?
+- **Malware** — Static pattern detection + behavioral sandbox analysis. Confirmed vs. suspicious verdicts with package-level attribution.
+- **IaC / Config** — Kubernetes, Docker, and infrastructure misconfigurations mapped to compliance frameworks
+
+**AI & LLM Security**
+- **OWASP LLM Top 10** — Prompt injection, data poisoning, model theft, and 7 more categories with Agentic Security Index
+- **AI Attack Surface** — Mapping of AI/ML entry points, model endpoints, and GenAI integration risks across your codebase
+
+**Supply Chain**
+- **Package Health** — Popularity, maintenance activity, and risk signals from npm, PyPI, and GitHub
+- **Dependency Confusion** — Typosquatting and namespace confusion detection
+
+**Data Protection**
+- **DLP / PII** — Taint analysis for data exposure, PII leakage, and privacy risk across source code
+
+**Governance & Visibility**
+- **GRC / Compliance** — Automated mapping to FedRAMP, CMMC 2.0, NIST 800-53, SOC2, and PCI-DSS
+- **Scan Coverage** — Per-scanner tool status, file coverage, and language breakdown
+- **Risk & Posture** — Aggregate risk scoring with severity distribution, reachability breakdown, and trend tracking
+
+---
+
+## Supported Languages
+
+**Full reachability analysis** (call graph tracing + all scanners):
+
+Python, JavaScript, TypeScript, Go, Java
+
+**Dependency & vulnerability scanning** (CVE, SBOM, secrets, IaC — reachability reported as UNKNOWN):
+
+Rust, Ruby, PHP, C#/.NET, C/C++, Swift, Kotlin, Scala, and 30+ additional ecosystems via SBOM.
 
 ---
 
@@ -33,7 +61,7 @@ REACHABLE scans your repository and determines which vulnerabilities, secrets, a
 curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
 ```
 
-### Installer Options
+### Options
 
 | Option | Description |
 |--------|-------------|
@@ -41,7 +69,6 @@ curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/in
 | `--clean` | Remove existing data before install |
 | `--version`, `-v` | Install a specific version |
 | `--wheel`, `-w` | Install from a local wheel file |
-| `--help`, `-h` | Show help |
 
 ### Upgrade
 
@@ -49,33 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/in
 curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
 ```
 
-> **Beta Notice:** For beta releases, use `--clean` when upgrading to avoid database compatibility issues.
-
----
-
-## Release Verification
-
-Every REACHABLE release is signed and checksummed. The installer verifies both automatically before installing anything.
-
-**SHA-256 checksum** — verified on every install. If the checksum does not match, the installer aborts immediately.
-
-**Cosign signature** — verified if `cosign` is installed. Each wheel is signed via [Sigstore](https://sigstore.dev) keyless signing tied to the GitHub Actions workflow that built it, providing a tamper-proof audit trail from source to binary.
-
-To verify manually:
-
-```bash
-# SHA-256
-sha256sum --check checksums.sha256
-
-# Cosign (requires cosign installed)
-cosign verify-blob \
-  --bundle reachable-<version>-<platform>.whl.cosign.bundle \
-  --certificate-identity-regexp "https://github.com/sthenos-security/" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  reachable-<version>-<platform>.whl
-```
-
-Checksums and bundles for all releases are in `wheels/v<version>/`.
+> **Beta Notice:** Use `--clean` when upgrading between beta releases to avoid database compatibility issues.
 
 ---
 
@@ -83,85 +84,107 @@ Checksums and bundles for all releases are in `wheels/v<version>/`.
 
 ### 1. Add to PATH
 
-The installer puts `reachctl` in `~/.reachable/venv/bin/`. Add it to your PATH — **required before running any command**:
-
 ```bash
 export PATH="$HOME/.reachable/venv/bin:$PATH"
 ```
 
-To make it permanent, add the line above to your `~/.zshrc` or `~/.bashrc`, then restart your shell.
+Add to your `~/.zshrc` or `~/.bashrc` to make it permanent.
 
-### 2. Install Dependencies
+### 2. Install External Tools
 
 ```bash
 reachctl doctor
 ```
 
-This installs the scanning tools (Syft, Grype, GuardDog, Semgrep). Run it once after installation. See [DOCTOR.md](DOCTOR.md) for sample output.
+Run once after installation. See [DOCTOR.md](DOCTOR.md) for details.
 
-### 3. Run a Scan
+### 3. Scan
 
 ```bash
 reachctl scan /path/to/your/repo
 ```
 
-That's it. REACHABLE will scan your repository and open an interactive dashboard with the results.
+Dashboard opens automatically.
 
-### 4. Set Up Authentication (Recommended)
+### Scan Options
 
-For full scan capability, store your GitHub and MCP tokens securely in the system keychain — do not set them as environment variables:
+| Flag | Effect |
+|------|--------|
+| `--debug` | Verbose output with timestamps |
+| `--no-ai` | Skip AI/LLM analysis (faster) |
+| `--no-dlp` | Skip DLP/PII analysis |
+| `--ci --fail-on high` | CI mode with threshold gating |
+
+### 4. Authentication (Recommended)
 
 ```bash
 reachctl auth login
 ```
 
-This prompts for your GitHub token and MCP token and stores them securely. Tokens set this way take precedence over environment variables and are never exposed in shell history or process listings.
+Stores GitHub and MCP tokens securely in the system keychain. See `reachctl primer` for token scopes and advanced options.
 
-See `reachctl primer` for token scopes, CI/CD setup, and advanced auth options.
-
-### What's Next
+### Reference
 
 ```bash
-reachctl primer       # Full command reference and advanced options
-reachctl --help       # Quick command overview
+reachctl primer       # Full interactive command reference
+reachctl --help       # Quick overview
 ```
+
+---
+
+## Enzo — AI Remediation (Preview)
+
+Enzo is REACHABLE's AI remediation engine. It reads scan findings, generates targeted patches, and optionally validates fixes with exploit payloads — all from the CLI.
+
+```bash
+reachctl enzo scan ~/src/myapp          # See what enzo can fix
+reachctl enzo run ~/src/myapp --dry-run # Preview patches without applying
+reachctl enzo run ~/src/myapp           # Apply fixes
+reachctl enzo pentest ~/src/myapp       # Verify fixes with exploit payloads
+```
+
+Runs locally via Ollama (code never leaves your machine) or via Claude API. See `reachctl enzo --help`.
+
+> Enzo is included as a preview in this beta. Full release targeted for a future version.
 
 ---
 
 ## CI/CD Integration
 
-Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins are included in [`cicd-templates/`](cicd-templates/):
+Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins:
 
 ```
 cicd-templates/
-├── github-actions/
-├── gitlab/
-└── jenkins/
+├── github-actions/reachable.yml
+├── gitlab/reachable.gitlab-ci.yml
+└── jenkins/Jenkinsfile
 ```
 
-Copy the relevant template into your repository and adjust the `FAIL_THRESHOLD` as needed.
+Copy the relevant template into your repository. For full documentation and local testing scripts, see [reach-dist-cicd](https://github.com/sthenos-security/reach-dist-cicd).
 
 ---
 
-## Data Storage
+## Release Verification
 
-REACHABLE stores data in `~/.reachable/`:
+Every release is signed and checksummed. The installer verifies both automatically.
 
-```
-~/.reachable/
-├── scans/     # Scan history and results
-├── cache/     # Cached data
-└── config/    # Configuration files
-```
+**SHA-256** — verified on every install. Mismatch aborts immediately.
+
+**Cosign** — verified if `cosign` is installed. Keyless OIDC signatures via [Sigstore](https://sigstore.dev), tied to the GitHub Actions workflow that built the wheel.
+
+Checksums and signature bundles for all releases are in `wheels/v<version>/`.
 
 ---
 
-## Uninstall
+## Roadmap
 
-```bash
-~/.reachable/venv/bin/pip uninstall reachable
-rm -rf ~/.reachable
-```
+Active development. Here's where we're headed:
+
+- **Enzo GA** — AI remediation engine: automated fix generation, validation, and commit. Local (Ollama) and cloud (Claude API) modes.
+- **RADR** — Runtime Application Detection & Response. Lightweight agent that monitors running workloads and correlates runtime behavior with static scan findings.
+- **Additional languages and build systems** — Expanding call graph reachability analysis to more ecosystems.
+- **Global intelligence cache** — Cross-scan knowledge graph that accelerates repeat scans and shares anonymized threat signals across deployments.
+- **Multi-tenant SaaS dashboard** — Centralized visibility across teams, repos, and environments. Role-based access, trend analytics, and policy enforcement.
 
 ---
 
@@ -173,26 +196,15 @@ rm -rf ~/.reachable
 export PATH="$HOME/.reachable/venv/bin:$PATH"
 ```
 
-Add this to your `~/.zshrc` or `~/.bashrc` to make it permanent.
+Add to `~/.zshrc` or `~/.bashrc` to make it permanent.
 
-### `Error resolving latest version: no releases found`
+### `Error resolving latest version`
 
-This means the GitHub releases API returned an empty list for `reach-dist`. It is **not** a rate limit issue under normal usage. The most common cause is that the release build workflow failed to create the release on `reach-dist` — the wheels may have been built but the final publish step silently failed.
+- **Version not yet published.** A new release may still be building. Wait a few minutes and retry.
+- **GitHub API rate limit.** Pass a token: `export GITHUB_TOKEN="ghp_yourtoken"` then re-run the installer.
+- **Network issue.** Verify you can reach `api.github.com`.
 
-Check the [reach-core Actions page](https://github.com/sthenos-security/reach-core/actions) to confirm the release job completed. If it did but the release is missing from reach-dist, it can be created manually:
-
-```bash
-gh release create vX.X.Xb21 --repo sthenos-security/reach-dist \
-  --title "REACHABLE vX.X.Xb21" \
-  --notes "Wheels for X.X.Xb21." --prerelease
-```
-
-If you genuinely are hitting the GitHub API rate limit (unlikely — unauthenticated limit is 60 req/hr), you can pass a token:
-
-```bash
-export GITHUB_TOKEN="ghp_yourtoken"  # no scopes required
-curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
-```
+If the problem persists, contact info@sthenosec.com.
 
 ---
 

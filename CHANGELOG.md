@@ -2,131 +2,64 @@
 
 ---
 
-## [1.0.0b31]
+## [1.0.0-beta33] — First Public Beta
 
-- Build: Fixed artifact upload path bug (`.cython-cache/` trailing slash → `.cython-cache`) — root cause of transpile→upload failure in b30
-- Build: Simplified artifact name (`cython-c-files` instead of tag-interpolated name)
-- Build: Added debug step to verify cache contents before upload
-- Build: Added `if: needs.transpile.result == 'success'` guard on build-wheels matrix
-- Build: Added `cache: 'pip'` to setup-python — saves ~30-60s per matrix job
-- Build: Set `compression-level: 0` on C cache artifact upload — faster upload/download across 12 jobs
+REACHABLE 1.0.0-beta33 is the first public beta release with fully compiled, signed, multi-platform wheels. This release represents a complete rearchitecture from the internal alpha, with significant improvements across every layer.
 
----
+### Platform
 
-## [1.0.0b30]
+- **Cython-compiled wheels** — IP-protected `.so` binaries for all protected modules (correlation engine, call graph, malware detection, licensing, DLP, AI security, Enzo). Source code is not shipped.
+- **12 wheels per release** — Python 3.11–3.14 × Linux x86_64, Linux ARM64, macOS universal2 (Intel + Apple Silicon)
+- **Keyless cosign signing** — every wheel is signed via Sigstore OIDC tied to the GitHub Actions build, with SHA-256 checksums and a transparency log entry
+- **One-line installer** — `curl | bash` with automatic platform detection, checksum verification, and optional cosign signature verification
 
-- All b29 fixes plus:
-- Build: removed cleanup-artifacts job (was deleting cross-run artifacts, breaking re-tags)
-- Build: concurrency cancel-in-progress disabled (prevents race conditions)
-- UX: heartbeat progress for clone, sandbox, and reachability analysis (no more silent 15-30s gaps)
-- Fix: Python 3.14.3 HTTP finalizer noise suppressed (health collector)
-- Fix: Cython build skips enzo/tests + enzo/docs (faster transpile)
-- Fix: verify_wheel respects KEEP_AS_PY for enzo entry points
+### Scanning
 
----
+- **Concurrent collectors** — all seven scanners (CVE/SBOM, Secrets, CWE, Malware, IaC, AI/LLM, DLP/PII) run concurrently in a single process. Typical scan: 60–90 seconds.
+- **Multi-signal reachability** — call graph analysis determines whether CVEs, secrets, and CWE findings are actually reachable from application code. Three-state model: REACHABLE / NOT_REACHABLE / UNKNOWN.
+- **Malware sandbox** — behavioral analysis via Docker containers. Static + dynamic detection with 4-counter metrics (confirmed/suspicious).
+- **Package health scoring** — popularity, activity, and maintenance signals from npm/PyPI/GitHub. Dependency confusion and typosquatting detection.
+- **AI/LLM security** — OWASP LLM Top 10 and MITRE ATLAS coverage with Agentic Security Index integration
+- **DLP/PII taint analysis** — data exposure and privacy risk detection across source code
 
-## [1.0.0b29]
+### Dashboard
 
-- Malware: Fixed empty `package_name` on 288 semgrep malware findings — normalizer now derives package from file path relative to repo root (22 distinct packages detected)
-- Malware: Sandbox `packages_tested` metric now flows from raw scanner output through to dashboard (`sandbox_packages_tested=190` verified end-to-end)
-- Malware: Sandbox findings fully ingested into DB (42 findings, 14 distinct malicious packages)
-- Malware: 4-counter metrics verified — static_confirmed/suspicious + dynamic_confirmed/suspicious all reconciled against DB
-- Dashboard: Sandbox metrics object added to data.json (packages_tested, malicious, suspicious, clean, verdict)
-- Pipeline: Full 4-layer audit verified (raw → DB → data.json → dashboard) — all 7 signal types reconcile exactly
-- CLI: `reachctl selftest` — faster, no longer runs full scan infrastructure; validates install, tools on PATH, and DB access
-- CLI: `reachctl selftest --unit / --integration / --full` flags unchanged
-- Build: release pipeline hardened — per-job timeouts, automatic cancellation of duplicate runs, immediate failure propagation across build matrix
-- Build: workflow linting added as mandatory gate before any build starts
-- **Enzo** (experimental): AI-assisted remediation engine included as preview — not fully tested, full release targeted for b30+
+- **Interactive HTML dashboard** — single-file, fully offline. Tabbed interface covering all seven signal types plus compliance, trends, and coverage.
+- **Compliance framework mapping** — FedRAMP, CMMC 2.0, NIST 800-53, SOC2, PCI-DSS. GRC framework inferral from scan findings.
+- **SARIF export** — integrates with GitHub Security tab, GitLab SAST, and any SARIF-compatible tool
 
----
+### CLI
 
-## [1.0.0b28]
+- **`reachctl scan`** — single command replaces the old multi-step pipeline. `--ci` mode for headless environments with structured exit codes.
+- **`reachctl doctor`** — dependency installer and health checker for all scanning tools
+- **`reachctl selftest`** — installation validator with `--unit`, `--integration`, and `--full` modes
+- **`reachctl primer`** — built-in quick-start guide and command reference
+- **`reachctl auth login`** — secure keychain-based token storage (GitHub, MCP)
 
-- CI/CD: Universal single-command pipeline for GitHub Actions, GitLab CI, and Jenkins — replaces all multi-job reference variants
-- CI/CD: `--ci` flag enables quiet output, structured exit codes, and auto-gates on `--fail-on critical`
-- CI/CD: `--no-dashboard` flag for faster CI scans when dashboard artifact is not needed
-- CI/CD: Docker scan consolidates to single `docker-compose.yml` with `--no-dashboard` opt-in via `run.sh`
-- Dashboard: Fixed `reachability_coverage_pct` showing zero — join timing issue in `getReachabilityCoverage()`
-- Dashboard: Fixed 31+ bugs across `main.js`, `tabs.js`, `owasp-cards.js`, `dashboard-styles.css` — GRC framework inferral, CWE hex hash display, CSV export filters, OWASP card heights, counter/table mismatches, color palette violations
-- Dashboard: SLA logic — unfixable CVEs show `NO FIX`, unknown severity shows `ASSESS`; fix status filter added
-- Dashboard: Config/IaC terminology unified to `Config` throughout UI and DB
-- Dashboard: Removed INFO from severity filter; cleaned up risk filter labels
-- Dashboard: Fixed `_DASHBOARD_HTML_READ_LIMIT` constant (bumped to 768 KB)
-- Dashboard: Fixed trends chart DLP race condition (`complete_scan()` called before DLP storage)
-- Supply chain: Phase 5 unresolved package tracking with fuzzy matching, DB operations, and CLI aliases
-- Supply chain: Fixed `_to_advisory_dicts()` dropping `is_direct` field; fixed `toggleGroup` badge hardcoding
-- Reachability: Fixed write-path ban for v1 `call_path` fields (T-CG28); fixed secret reachability downgrade bug (T-CG29); fixed `callable_functions` multi-parent BFS crash (T-CG30)
-- Scanning: Upgraded Syft (v1.42.1) and Grype (v0.109.0) with version-mismatch detection in `preflight.py`
-- CLI: `reachctl selftest` Phase 4 — `test_cli_comprehensive.py` wired in (893 passed, 0 failed)
-- CLI: Fixed stale `template-shell-compiled.html` and `TestSemgrepRules` pyyaml guard
-- CLI: Emoji removed from 157 Python source files
-- Distribution: Consolidated CI/CD into `reach-dist-cicd`; removed `reach-cicd`
-- Distribution: Cosign keyless signing with GitHub OIDC on all wheel releases
+### Enzo (Experimental)
 
----
+- **AI-assisted remediation engine** — included as a preview. Automated fix suggestions for CVE, CWE, and secrets findings. Full release targeted for a future beta.
 
-## [1.0.0b17]
+### CI/CD
 
-- Release integrity: SHA-256 checksum and Sigstore/cosign signature verification on every install
-- Installer: `doctor` now runs before `selftest` during installation
-- `reachctl version`: removed tool status (belongs in `reachctl doctor`)
-- `reachctl selftest`: accurate tool paths shown, managed tools only resolved from `~/.reachable`
-- `reachctl pipeline init`: fixed session ID capture in CI (output via `print()`, `--json` flag)
-- CI/CD templates: fixed serial scan session ID parsing
+- **One-command CI integration** — GitHub Actions, GitLab CI, and Jenkins templates. Single job, no shared volumes, no coordination.
+- **`--fail-on` threshold gating** — `critical | high | medium | any | none` exit code control for pipeline gates
+- **Docker-based scanning** — `docker-compose.yml` with `run.sh` wrapper for containerized environments
 
----
+### Distribution
 
-## [1.0.0b16]
-
-- Dashboard improvements: new tabs, improved rendering, badge fixes
-- Supply chain analysis: popularity and activity scoring, dependency confusion detection
-- Package health pipeline integrated into scan workflow
-- Call graph visualization enhancements
-- Reachability correlation engine improvements
-- CI/CD template updates for GitHub Actions, GitLab, and Jenkins
-- Dependency updates: Syft, Grype
-
----
-
-## [1.0.0b10]
-
-- Dashboard v2: tabbed interface, split-component architecture
-- DLP/PII scanner added
-- AI/LLM security module: OWASP LLM Top 10, MITRE ATLAS
-- Supply chain sandbox: behavioral testing via Docker
-- Compliance framework mapping: FedRAMP, CMMC 2.0, NIST, SOC2, PCI-DSS
-- Multi-platform wheel builds: Linux x86_64/ARM64, macOS Universal
-
----
-
-## [1.0.0b8]
-
-- Installer upgrade support: `--update`, `--clean`, `--version` flags
-- Dashboard UI improvements
-- Improved remediation workflow
-
----
-
-## [1.0.0b7]
-
-- Call graph visualization in dashboard
-- macOS Universal2 wheel support
-- Initial beta release
+- **Two-repo architecture** — `reach-core` (private source) + `reach-dist` (public distribution: wheels, installer, docs, CI/CD templates)
+- **Automated release pipeline** — tag-triggered: transpile → matrix build → sign → GitHub release → reach-dist sync
 
 ---
 
 ## Upgrading
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
-```
-
-For beta releases, a clean install is recommended:
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --clean
 ```
+
+Clean install is recommended for beta releases.
 
 ---
 
