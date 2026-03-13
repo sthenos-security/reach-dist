@@ -59,12 +59,13 @@ reachable:
   allow_failure:
     exit_codes: 2
   script:
+    # Re-export PATH — before_script exports don't always survive to script block
+    - export PATH="$HOME/.reachable/venv/bin:$PATH"
     - reachctl scan . --ci --fail-on "$FAIL_THRESHOLD" --sarif reachable.sarif
   artifacts:
     when: always
     expire_in: 30 days
     paths:
-      - ~/.reachable/scans/**/dashboard/
       - reachable.sarif
     reports:
       sast: reachable.sarif
