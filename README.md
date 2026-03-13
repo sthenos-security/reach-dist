@@ -1,8 +1,8 @@
 # REACHABLE by Sthenos Security
 
-Traditional AppSec tooling drowns you in CVEs you'll never fix. REACHABLE cuts through the noise — it maps your call graph, traces data flow, and tells you exactly which vulnerabilities are reachable from your running code. Everything else gets deprioritized so your team fixes what actually matters.
+Your dependencies have hundreds of known vulnerabilities. Most will never be exploited. REACHABLE maps your call graph, traces data flow, and tells you exactly which ones are reachable from your running code. Fix what matters, ignore what doesn't.
 
-One command. Seven concurrent scanners. Full interactive dashboard in 90 seconds.
+One command. Multi-signal reachability analysis. Full interactive dashboard in 90 seconds.
 
 ---
 
@@ -30,7 +30,7 @@ REACHABLE performs multi-signal reachability analysis across your entire applica
 
 **Governance & Visibility**
 - **GRC / Compliance** — Automated mapping to FedRAMP, CMMC 2.0, NIST 800-53, SOC2, and PCI-DSS
-- **Scan Coverage** — Per-scanner tool status, file coverage, and language breakdown
+- **Scan Coverage** — Per-signal tool status, file coverage, and language breakdown
 - **Risk & Posture** — Aggregate risk scoring with severity distribution, reachability breakdown, and trend tracking
 
 ---
@@ -39,7 +39,7 @@ REACHABLE performs multi-signal reachability analysis across your entire applica
 
 Python, JavaScript/TypeScript, Go, Java
 
-All scanners — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM, DLP — work across these languages. Additional languages and build systems are on the [roadmap](#roadmap).
+Full analysis — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM, DLP — works across these languages. Additional languages and build systems are on the [roadmap](#roadmap).
 
 ---
 
@@ -166,23 +166,15 @@ Active development. Here's where we're headed:
 
 ---
 
-## Troubleshooting
+## Note
 
-### `reachctl: command not found`
+If `reachctl` is not found after install, add it to your PATH:
 
 ```bash
 export PATH="$HOME/.reachable/venv/bin:$PATH"
 ```
 
 Add to `~/.zshrc` or `~/.bashrc` to make it permanent.
-
-### `Error resolving latest version`
-
-- **Version not yet published.** A new release may still be building. Wait a few minutes and retry.
-- **GitHub API rate limit.** Pass a token: `export GITHUB_TOKEN="ghp_yourtoken"` then re-run the installer.
-- **Network issue.** Verify you can reach `api.github.com`.
-
-If the problem persists, contact info@sthenosec.com.
 
 ---
 
