@@ -16,13 +16,13 @@ This backs up your existing data and installs the latest release.
 
 ## Wheel Availability
 
-Each release provides **15 wheels** covering:
+Each release provides **12 wheels** covering:
 
 | Platform | Architecture | Python Versions |
 |----------|--------------|-----------------|
-| Linux | x86_64 | 3.10, 3.11, 3.12, 3.13, 3.14 |
-| Linux | ARM64 | 3.10, 3.11, 3.12, 3.13, 3.14 |
-| macOS | Universal (Intel + Apple Silicon) | 3.10, 3.11, 3.12, 3.13, 3.14 |
+| Linux | x86_64 | 3.11, 3.12, 3.13, 3.14 |
+| Linux | ARM64 | 3.11, 3.12, 3.13, 3.14 |
+| macOS | Universal (Intel + Apple Silicon) | 3.11, 3.12, 3.13, 3.14 |
 
 Wheels are located in `wheels/v<version>/`.
 
