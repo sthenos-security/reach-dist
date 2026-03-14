@@ -2,6 +2,39 @@
 
 ---
 
+## [1.0.0-beta34] — AI-Enhanced Reachability
+
+### Enzo AI Reachability (`enzo analyze`)
+
+- **AI taint oracle** — Variable-level reachability refinement. Determines whether the variable at a sink is attacker-controlled (ATTACKER_CONTROLLED), safe (constant/config/validated), or uncertain.
+- **Three-layer pipeline** — Call graph (function) + AI taint (variable) + AI invocation (execution pattern). `--deep` flag runs all three on every finding.
+- **Dashboard AI badges** — Green "AI ✓" (confirmed), blue "AI ↓" (safe/demoted), red "AI ↑" (promoted by AI).
+- **Malware guard** — Files flagged by malware scanner are auto-skipped by taint analysis. Behavior overrides taint.
+- **Prompt caching** — SHA-256 prompt hash skips re-analysis of unchanged code.
+- **Branch cleanup** (`enzo clean`) — Purge fix/batch branches. `--all` or `--dry-run`.
+
+### Enzo Remediation Improvements
+
+- **autopep8 indent repair** — Replaces heuristic indent fixer. Indent hallucinations 27→18, autopep8 fixed 25 issues.
+- **Merge conflict auto-resolution** — 150 conflicts auto-resolved, 0 unresolved.
+- **Clearer testgen logs** — Advisory exploit tests show ⚠ (not ✗) with explanation.
+- **99% success rate** — 311/314 findings remediated on testbed.
+
+### Schema
+
+- **`findings` table** — Added `taint_verdict`, `taint_source`, `taint_confidence`, `taint_reasoning`, `reachability_source` columns.
+- **`ai_reachability_audit` table** — Full verdict history for debugging (model, tokens, cost, duration, prompt hash).
+- **Migration** — Existing databases auto-migrate via `ALTER TABLE ADD COLUMN`.
+
+### Documentation
+
+- **`ai-enhanced-reachability.md`** — Complete design doc: three layers, risk matrix, data flow, CLI, phases.
+- **`enzo-validation-pipeline.md`** — Validation stage reference with blocking vs advisory.
+- **Primer** — AI Reachability runbook, `--ai-enhance` scan flag.
+- **Invocation patterns test suite** — 4 languages × 3 cases × 7 subtypes in reach-testbed.
+
+---
+
 ## [1.0.0-beta33] — First Public Beta
 
 REACHABLE 1.0.0-beta33 is the first public beta release with fully compiled, signed, multi-platform wheels. This release represents a complete rearchitecture from the internal alpha, with significant improvements across every layer.
