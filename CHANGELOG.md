@@ -38,7 +38,13 @@ REACHABLE 1.0.0-beta33 is the first public beta release with fully compiled, sig
 
 ### Enzo (Experimental)
 
-- **AI-assisted remediation engine** — included as a preview. Automated fix suggestions for CVE, CWE, and secrets findings. Full release targeted for a future beta.
+- **AI-assisted remediation engine** — Automated patch generation, validation, and commit for CVE, CWE, and secrets findings. 99% success rate on testbed (311/314 findings remediated). Closed-loop validation: syntax check, build, exploit test, semgrep rescan.
+- **AI reachability analysis** (`enzo analyze`) — Refines call graph verdicts with variable-level taint tracing. Determines whether the input reaching a vulnerable sink is attacker-controlled or safe (constant/config/validated). Results: 154 confirmed exploitable, 43 false positives downgraded on testbed.
+- **Three-layer reachability** — Call graph (function-level) + AI taint oracle (variable-level) + AI invocation classifier (execution pattern). `--deep` flag analyzes all findings including NOT_REACHABLE.
+- **Dashboard AI badges** — Findings show AI verification status: green "AI ✓" (confirmed exploitable), blue "AI ↓" (safe), red "AI ↑" (promoted by AI).
+- **Malware guard** — AI taint analysis automatically skips files flagged by the malware scanner. Behavior (C2 download, payload exec) overrides taint verdict.
+- **Prompt caching** — SHA-256 prompt hash avoids re-analyzing unchanged code across runs.
+- **Branch cleanup** (`enzo clean`) — Purge accumulated fix/batch branches. `--dry-run` to preview.
 
 ### CI/CD
 

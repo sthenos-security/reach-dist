@@ -154,11 +154,38 @@ Checksums and signature bundles for all releases are in `wheels/v<version>/`.
 
 ---
 
+## Enzo — AI-Powered Security Intelligence (Experimental)
+
+Enzo is REACHABLE's AI engine. It adds two capabilities on top of the core scan:
+
+**AI Remediation** — Generates, validates, and commits security patches automatically. Each patch is tested in an isolated git worktree (syntax check, build, exploit test, rescan) before touching your code. Supports local models (Ollama — fully private) and cloud APIs (Groq, Claude).
+
+**AI Reachability** — Refines the call graph's reachability verdicts using AI-powered analysis. The call graph determines if a *function* is reachable; the AI determines if the *variable* flowing into it is actually attacker-controlled. This reduces false positives where the code pattern matches but the input is a constant, config value, or validated data.
+
+```bash
+# Setup (one-time)
+reachctl enzo setup                    # pulls model or configures API key
+reachctl enzo doctor                   # health check
+
+# Remediation
+reachctl enzo scan ~/src/myapp         # show fixable findings
+reachctl enzo run ~/src/myapp          # fix all (local model)
+reachctl enzo run ~/src/myapp --mode cloud --provider groq  # cloud model
+
+# AI reachability
+reachctl enzo analyze ~/src/myapp --type cwe    # refine CWE verdicts
+reachctl enzo analyze ~/src/myapp --deep        # full analysis
+```
+
+Enzo is experimental in this release. Results are written to the scan database and reflected in the dashboard with AI verification badges. Source code is never sent to cloud APIs unless you explicitly opt in.
+
+---
+
 ## Roadmap
 
 Active development. Here's where we're headed:
 
-- **AI-powered remediation** — Automated fix generation, validation, and commit. Runs locally or via cloud API — code never leaves your machine unless you choose.
+- **Enzo GA** — Production-ready AI remediation and reachability. Batch mode (`--ai-enhance` flag on scan), invocation pattern detection, secret loader tracing.
 - **RADR** — Runtime Application Detection & Response. Lightweight agent that monitors running workloads and correlates runtime behavior with static scan findings.
 - **Additional languages and build systems** — Expanding reachability analysis to more ecosystems.
 - **Global intelligence cache** — Cross-scan knowledge graph that accelerates repeat scans and shares anonymized threat signals across deployments.
