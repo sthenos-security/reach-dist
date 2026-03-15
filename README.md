@@ -134,11 +134,13 @@ Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins:
 
 | Platform | Template | Copy to |
 |---|---|---|
-| GitHub Actions | [`github-actions.yml`](cicd-templates/github-actions.yml) | `.github/workflows/reachable.yml` |
-| GitLab CI | [`gitlab-ci.yml`](cicd-templates/gitlab-ci.yml) | `.gitlab-ci.yml` (repo root) |
-| Jenkins | [`Jenkinsfile`](cicd-templates/Jenkinsfile) | `Jenkinsfile` (repo root) |
+| GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) | `.github/workflows/reachable.yml` |
+| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) | `.gitlab-ci.yml` (repo root) |
+| Jenkins | [`Jenkinsfile`](jenkins/Jenkinsfile) | `Jenkinsfile` (repo root) |
 
-For full documentation and local testing scripts, see [reach-dist-cicd](https://github.com/sthenos-security/reach-dist-cicd).
+All templates auto-detect AI reachability: if `GROQ_API_KEY` is set as a secret/variable, `--ai-enhance` is added to the scan automatically. No key = scan still works, just without AI.
+
+The testbed repos are forkable — fork one, push, and see REACHABLE scan results immediately.
 
 ---
 

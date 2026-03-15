@@ -1,0 +1,88 @@
+// REACHABLE Universal Security Scan — Jenkinsfile
+//
+// Single stage. REACHABLE runs all scanners concurrently in one process.
+// Works on any Jenkins agent — no shared volumes, no coordination needed.
+//
+// ── Setup ─────────────────────────────────────────────────────────────
+//   1. Copy this file to your repo root as 'Jenkinsfile'
+//   2. Create a Pipeline job → Script from SCM
+//   3. Optional: Add GROQ_API_KEY credential for AI reachability
+//
+// ── AI Reachability (optional) ────────────────────────────────────────
+//   1. Manage Jenkins → Credentials → Add 'groq-api-key' (Secret text)
+//   2. Uncomment GROQ_API_KEY line below
+//   3. AI analysis runs automatically — no other changes needed
+//   Get a free key: https://console.groq.com/keys
+//
+// Exit codes: 0 = clean, 2 = findings above threshold, 1 = scan error
+
+pipeline {
+
+    agent any  // Replace with: agent { label 'your-runner' }
+
+    options {
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        REACHABLE_DIST_REPO = 'sthenos-security/reach-dist'
+        REACHABLE_VERSION   = ''       // leave empty for latest
+        FAIL_THRESHOLD      = 'high'   // critical | high | medium | any | none
+        // AI reachability (optional — uncomment and set credential ID)
+        // GROQ_API_KEY     = credentials('groq-api-key')
+        // ANTHROPIC_API_KEY = credentials('anthropic-api-key')
+    }
+
+    stages {
+
+        stage('Install REACHABLE') {
+            steps {
+                sh '''
+                    ARGS=""
+                    [ -n "${REACHABLE_VERSION}" ] && ARGS="--version ${REACHABLE_VERSION}"
+                    curl -fsSL "https://raw.githubusercontent.com/${REACHABLE_DIST_REPO}/main/install.sh" | bash -s -- $ARGS
+                    reachctl version
+                '''
+            }
+        }
+
+        stage('Scan') {
+            steps {
+                script {
+                    // Auto-enable AI if key is available
+                    def aiFlag = (env.GROQ_API_KEY || env.ANTHROPIC_API_KEY) ? ' --ai-enhance' : ''
+                    def result = sh(
+                        script: "reachctl scan . --ci --fail-on \"$FAIL_THRESHOLD\" --sarif reachable.sarif${aiFlag}; echo \$?",
+                        returnStdout: true
+                    ).trim()
+                    def exitCode = result.split('\n').last().trim()
+                    env.SCAN_EXIT = exitCode
+                    if (exitCode == '2') {
+                        unstable("REACHABLE: findings above threshold '${env.FAIL_THRESHOLD}'")
+                    } else if (exitCode != '0') {
+                        error("REACHABLE: scan failed (exit ${exitCode})")
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh "mkdir -p build/dashboard && find \${HOME}/.reachable/scans -type d -name dashboard -exec cp -r {}/ build/dashboard/ \\; 2>/dev/null || true"
+            archiveArtifacts artifacts: 'build/dashboard/**', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'reachable.sarif', allowEmptyArchive: true
+            script {
+                def status = env.SCAN_EXIT == '0' ? 'Clean'
+                           : env.SCAN_EXIT == '2' ? 'Findings above threshold'
+                                                  : 'Error'
+                currentBuild.description = status
+            }
+        }
+        success  { echo "REACHABLE: clean" }
+        unstable { echo "REACHABLE: findings above threshold (${FAIL_THRESHOLD})" }
+        failure  { echo "REACHABLE: scan error — check logs" }
+    }
+}
