@@ -157,6 +157,8 @@ Supported providers: Groq (`GROQ_API_KEY`), OpenAI (`OPENAI_API_KEY`), Anthropic
 
 The dashboard shows AI verification badges next to each finding. Without `--ai-enhance`, scan results are still complete — AI adds a second verification layer.
 
+> **AI Data Disclosure:** When using `--ai-enhance` with a cloud provider, REACHABLE sends code snippets surrounding each security finding (typically 10–30 lines) and finding metadata (file path, line number, finding type) to the selected LLM API for analysis. Full source files and your complete repository are never sent. Without `--ai-enhance`, no source code leaves your machine. Your data is governed by your cloud LLM provider's terms of service and data retention policies. For fully private analysis with no external data transfer, use a local model via `reachctl enzo analyze --mode local`.
+
 ### 5. Authentication (Recommended)
 
 ```bash
@@ -309,3 +311,7 @@ Email: info@sthenosec.com
 ---
 
 © 2026 Sthenos Security. All rights reserved.
+
+---
+
+> ⚠️ Results are risk-informed guidance based on available data sources and metadata; not a guarantee of security or compliance. Sthenos Security assumes no liability for actions taken based on these findings and does not share or expose your proprietary source code.
