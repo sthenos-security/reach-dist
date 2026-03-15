@@ -18,7 +18,7 @@
 ### Scan Pipeline
 
 - **Semgrep exclude version stamp** — Per-repo `semgrep-exclude.txt` now re-seeds automatically when `EXCLUDE_DIRS` changes. Fixes stale exclusion lists from prior versions.
-- **Provider-agnostic error handling** — Fatal error detection covers Groq, Claude, OpenAI, and generic HTTP auth failures (401/403). Rate limit and quota exhaustion abort gracefully.
+- **Provider-agnostic error handling** — LLM factory with rate-limit detection, quota exhaustion abort, and graceful partial results. Covers Groq, Claude, OpenAI, and generic HTTP auth failures (401/403).
 - **`--include-unknown-secrets` removed** — Dead flag (UNKNOWN already in default analysis set). Simplified to two modes: default (REACHABLE + UNKNOWN) and `--deep` (adds NOT_REACHABLE).
 
 ### Documentation
@@ -32,7 +32,6 @@
 
 - **CG-JS-FP** — JavaScript call graph over-traces `require()` chains. `cwe_not_reachable.js` and `dead_code.js` incorrectly marked REACHABLE.
 - **CG-PY-UNK** — Python `cwe_unknown.py` classified NOT_REACHABLE instead of UNKNOWN (conservative direction).
-- **Rate limit handling** — Groq free tier rate-limits can cause slow scans (~20 min for 419 findings). Graceful abort partially implemented.
 
 ---
 
