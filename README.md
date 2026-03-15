@@ -1,8 +1,8 @@
 # REACHABLE by Sthenos Security
 
-REACHABLE performs deep code analysis and tells you exactly which vulnerabilities are reachable from your running code. Fix what matters, ignore what doesn't.
+AI-powered reachability analysis. Know exactly which vulnerabilities your code can actually reach — and which ones are noise.
 
-One command. Multi-signal reachability analysis. Full interactive dashboard in 90 seconds.
+One command. Seven signal types. AI-verified results. Full interactive dashboard in 90 seconds.
 
 ---
 
@@ -129,9 +129,30 @@ Dashboard opens automatically.
 | `--no-ai` | Skip AI/LLM analysis (faster) |
 | `--no-dlp` | Skip DLP/PII analysis |
 | `--ci --fail-on high` | CI mode with threshold gating |
-| `--ai-enhance` | AI-powered reachability refinement (enzo) |
+| `--ai-enhance` | AI-verified reachability (reduces false positives) |
 
-### 4. Authentication (Recommended)
+### 4. Reduce False Positives with AI (Optional)
+
+REACHABLE's call graph tells you which functions are reachable. AI goes deeper — it reads the code and verifies whether the *variable* flowing into the vulnerable sink is actually attacker-controlled. Constant? Config value? Validated input? AI catches what pattern matching can't.
+
+```bash
+# 1. Get a free API key (one-time)
+#    https://console.groq.com/keys
+
+# 2. Set the key
+export GROQ_API_KEY=gsk_...
+# or store it securely:
+reachctl auth login
+
+# 3. Scan with AI
+reachctl scan /path/to/your/repo --ai-enhance
+```
+
+That's it. No local model, no Docker, no setup. The dashboard will show AI verification badges next to each finding.
+
+Without `--ai-enhance`, scan results are still complete — AI just adds a second verification layer.
+
+### 5. Authentication (Recommended)
 
 ```bash
 reachctl auth login
@@ -176,30 +197,47 @@ Checksums and signature bundles for all releases are in `wheels/v<version>/`.
 
 ---
 
-## Enzo — AI-Powered Security Intelligence (Experimental)
+## Enzo AI Engine (Experimental)
 
-Enzo is REACHABLE's AI engine. It adds two capabilities on top of the core scan:
+Enzo adds two AI-powered capabilities on top of the core scan. Both are optional — the scan is complete without them.
 
-**AI Remediation** — Generates, validates, and commits security patches automatically. Each patch is tested in an isolated git worktree (syntax check, build, exploit test, rescan) before touching your code. Supports local models (Ollama — fully private) and cloud APIs (Groq, Claude).
+### 1. AI Reachability Analysis
 
-**AI Reachability** — Refines the call graph's reachability verdicts using AI-powered analysis. The call graph determines if a *function* is reachable; the AI determines if the *variable* flowing into it is actually attacker-controlled. This reduces false positives where the code pattern matches but the input is a constant, config value, or validated data.
+The call graph determines which *functions* are reachable. AI goes one level deeper and determines whether the *variable* flowing into the vulnerable function is actually exploitable.
+
+A SQL injection in a function called from an HTTP route is reachable — but if the variable is a hardcoded constant, it's a false positive. AI reads your code and makes this distinction for CWE, secrets, DLP, and AI/LLM findings.
 
 ```bash
-# Setup (one-time)
-reachctl enzo setup                    # pulls model or configures API key
-reachctl enzo doctor                   # health check
+# Cloud (zero setup — set one API key and go)
+export GROQ_API_KEY=gsk_...                   # free at console.groq.com/keys
+reachctl scan ~/src/myapp --ai-enhance        # AI runs automatically after scan
 
-# Remediation
-reachctl enzo scan ~/src/myapp         # show fixable findings
-reachctl enzo run ~/src/myapp          # fix all (local model)
-reachctl enzo run ~/src/myapp --mode cloud --provider groq  # cloud model
-
-# AI reachability
-reachctl enzo analyze ~/src/myapp --type cwe    # refine CWE verdicts
-reachctl enzo analyze ~/src/myapp --deep        # full analysis
+# Local (fully private — code never leaves your machine)
+reachctl doctor --full                        # install Ollama
+reachctl enzo setup                           # pull model (~20GB, one-time)
+reachctl scan ~/src/myapp --ai-enhance        # auto-detects local model
 ```
 
-Enzo is experimental in this release. Results are written to the scan database and reflected in the dashboard with AI verification badges. Source code is never sent to cloud APIs unless you explicitly opt in.
+Results appear in the scan log and as verification badges in the dashboard.
+
+### 2. AI Remediation
+
+Automatically generates, validates, and commits security patches. Each fix is tested in an isolated git worktree before touching your code:
+
+1. Patch applies cleanly (syntax + build)
+2. Exploit test verifies the vulnerability is resolved
+3. Rescan confirms the finding is gone
+4. Commit only if all checks pass
+
+```bash
+reachctl enzo scan ~/src/myapp                # show fixable findings
+reachctl enzo run ~/src/myapp --dry-run       # preview patches without applying
+reachctl enzo run ~/src/myapp                 # fix all findings
+```
+
+Supports code patches (CWE), dependency upgrades (CVE), config changes, and secret rotation. Works with local models (Ollama) or cloud APIs (Groq, Claude).
+
+See `reachctl enzo --help` and `reachctl primer` for the full command reference.
 
 ---
 
@@ -207,7 +245,7 @@ Enzo is experimental in this release. Results are written to the scan database a
 
 Active development. Here's where we're headed:
 
-- **Enzo GA** — Production-ready AI remediation and reachability. Batch mode (`--ai-enhance` flag on scan), invocation pattern detection, secret loader tracing.
+- **Enzo GA** — Production-ready AI reachability analysis (variable-level taint) and AI remediation (automated patching). Invocation pattern detection, dedicated AI/LLM and DLP prompts, `--deep` mode.
 - **RADR** — Runtime Application Detection & Response. Lightweight agent that monitors running workloads and correlates runtime behavior with static scan findings.
 - **Additional languages and build systems** — Expanding reachability analysis to more ecosystems.
 - **Global intelligence cache** — Cross-scan knowledge graph that accelerates repeat scans and shares anonymized threat signals across deployments.
