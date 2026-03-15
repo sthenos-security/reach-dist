@@ -144,22 +144,18 @@ Dashboard opens automatically.
 
 ### 4. Reduce False Positives with AI (Optional)
 
-REACHABLE's call graph tells you which functions are reachable. AI goes deeper — it reads the code and verifies whether the *variable* flowing into the vulnerable sink is actually attacker-controlled. Constant? Config value? Validated input? AI catches what pattern matching can't.
+Add `--ai-enhance` to any scan and AI performs deeper code analysis to significantly reduce false positives. It auto-detects which provider to use.
+
+Set up an API key in your environment or store it in your local secret store (keychain):
 
 ```bash
-# 1. Set any one of these API keys (one-time)
-export GROQ_API_KEY=gsk_...                   # console.groq.com/keys (fast, cheap)
-export OPENAI_API_KEY=sk-...                  # platform.openai.com/api-keys (GPT-4o)
-export ANTHROPIC_API_KEY=sk-ant-...           # console.anthropic.com (highest quality)
-# or store securely: reachctl auth login
-
-# 2. Scan with AI
+export GROQ_API_KEY=gsk_...
 reachctl scan /path/to/your/repo --ai-enhance
 ```
 
-That's it. No local model, no Docker, no setup. Set one API key and `--ai-enhance` auto-detects which provider to use. The dashboard will show AI verification badges next to each finding.
+Supported providers: Groq (`GROQ_API_KEY`), OpenAI (`OPENAI_API_KEY`), Anthropic (`ANTHROPIC_API_KEY`), or `reachctl auth login` for keychain storage.
 
-Without `--ai-enhance`, scan results are still complete — AI just adds a second verification layer.
+The dashboard shows AI verification badges next to each finding. Without `--ai-enhance`, scan results are still complete — AI adds a second verification layer.
 
 ### 5. Authentication (Recommended)
 
