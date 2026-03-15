@@ -30,8 +30,7 @@
 
 ### Known Issues
 
-- **CG-JS-FP** — JavaScript call graph over-traces `require()` chains. `cwe_not_reachable.js` and `dead_code.js` incorrectly marked REACHABLE.
-- **CG-PY-UNK** — Python `cwe_unknown.py` classified NOT_REACHABLE instead of UNKNOWN (conservative direction).
+None. CG-JS-FP and CG-PY-UNK resolved in this release.
 
 ---
 
