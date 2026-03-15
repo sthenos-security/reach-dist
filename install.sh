@@ -221,6 +221,20 @@ detect_environment() {
         exit 1
     fi
     
+    # Check python3-venv is available (common missing package on Debian/Ubuntu ARM64)
+    if ! python3 -c "import venv" 2>/dev/null; then
+        print_error "python3-venv not available"
+        if [[ "$OS" == "linux" ]]; then
+            echo ""
+            echo "  Fix (Debian/Ubuntu):"
+            echo "    sudo apt install python3-venv python3-dev"
+            echo ""
+            echo "  Fix (RHEL/Fedora):"
+            echo "    sudo dnf install python3-devel"
+        fi
+        exit 1
+    fi
+    
     PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     PY_MAJOR=$(echo $PY_VERSION | cut -d. -f1)
     PY_MINOR=$(echo $PY_VERSION | cut -d. -f2)
@@ -425,9 +439,23 @@ download_and_install() {
 
     # Install into venv
     print_step "Installing REACHABLE v$VERSION"
-    python3 -m venv "$HOME/.reachable/venv"
+    if ! python3 -m venv "$HOME/.reachable/venv" 2>&1; then
+        print_error "Failed to create virtual environment"
+        if [[ "$OS" == "linux" ]]; then
+            echo "  Try: sudo apt install python3-venv python3-dev"
+        fi
+        exit 1
+    fi
     "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
-    "$HOME/.reachable/venv/bin/pip" install "$WHEEL_FILE" -q
+    set +e
+    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install "$WHEEL_FILE" 2>&1)
+    PIP_RC=$?
+    set -e
+    if [[ $PIP_RC -ne 0 ]]; then
+        echo "$PIP_OUTPUT" | tail -30
+        print_error "pip install failed (exit $PIP_RC) — see output above"
+        exit 1
+    fi
     print_ok "Installation complete"
 
     # Cleanup
