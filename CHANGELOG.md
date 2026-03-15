@@ -2,6 +2,40 @@
 
 ---
 
+## [1.0.0-beta35] — AI Reachability GA
+
+### AI Reachability (`--ai-enhance`)
+
+- **Cloud-first** — `reachctl scan --ai-enhance` uses Groq or Claude API. Zero local setup — set one API key and go. Auto-detects key from env vars or system keychain.
+- **Four-signal AI analysis** — CWE (taint), SECRET (loader), DLP (flow), AI/LLM (guardrails). CVE/MALWARE/CONFIG skipped by design — call graph is the gold standard for those.
+- **AI/LLM security prompt** — Dedicated prompt for OWASP LLM findings. Detects user input flowing to LLM APIs without guardrails (prompt injection, jailbreak exposure).
+- **DLP three-pass analysis** — DLP and AI/LLM findings from separate tables (`dlp_findings`, `ai_findings`) now analyzed alongside `findings`. Three adapters map different schemas to unified `EnzoFinding`.
+- **Malware guard v2** — Files with malware findings are analyzed normally (not skipped). AI can confirm ATTACKER_CONTROLLED. Only demotion to SAFE is blocked (behavior overrides taint). Unblocked 119 CWE findings previously suppressed.
+- **Plan/cost/time estimate** — Shows findings breakdown, estimated API calls, time, and cost before analysis starts.
+- **User-friendly output** — Clean summary: confirmed exploitable, downgraded safe, per-signal breakdown. No internal noise (UNCERTAIN counts, malware guard skips).
+- **Testbed validated** — 292 confirmed exploitable, 51 safe, 56.5% noise reduction. All AI verdicts verified against signal-matrix and invocation-patterns ground truth.
+
+### Scan Pipeline
+
+- **Semgrep exclude version stamp** — Per-repo `semgrep-exclude.txt` now re-seeds automatically when `EXCLUDE_DIRS` changes. Fixes stale exclusion lists from prior versions.
+- **Provider-agnostic error handling** — Fatal error detection covers Groq, Claude, OpenAI, and generic HTTP auth failures (401/403). Rate limit and quota exhaustion abort gracefully.
+- **`--include-unknown-secrets` removed** — Dead flag (UNKNOWN already in default analysis set). Simplified to two modes: default (REACHABLE + UNKNOWN) and `--deep` (adds NOT_REACHABLE).
+
+### Documentation
+
+- **AI signal filtering table** — Design doc §7: which signals AI analyzes and why, with detailed rationale for each.
+- **Pre-release checklist** — `validate.py` required before every build. Known CG failures tracked.
+- **Enzo section rewrite** — reach-dist README clearly separates AI Reachability Analysis vs AI Remediation.
+- **Setup and provider tables** — `doctor --full` + `enzo setup` flow documented. Cloud vs local decision matrix.
+
+### Known Issues
+
+- **CG-JS-FP** — JavaScript call graph over-traces `require()` chains. `cwe_not_reachable.js` and `dead_code.js` incorrectly marked REACHABLE.
+- **CG-PY-UNK** — Python `cwe_unknown.py` classified NOT_REACHABLE instead of UNKNOWN (conservative direction).
+- **Rate limit handling** — Groq free tier rate-limits can cause slow scans (~20 min for 419 findings). Graceful abort partially implemented.
+
+---
+
 ## [1.0.0-beta34] — AI-Enhanced Reachability
 
 ### Enzo AI Reachability (`enzo analyze`)
