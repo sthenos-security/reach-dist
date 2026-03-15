@@ -8,9 +8,12 @@ One command. Seven signal types. AI-verified results. Full interactive dashboard
 
 ## What's New in v1.0.0-beta35
 
-**AI Reachability Analysis** — The scan can now verify whether a vulnerability is actually exploitable, not just reachable. Add `--ai-enhance` to any scan and AI reads your code to determine if the variable at the sink is attacker-controlled, a hardcoded constant, or a validated input. Works across CWE, secrets, DLP, and AI/LLM findings. Set one API key (`GROQ_API_KEY`) and go — no local setup required.
+- **AI reachability analysis** — `--ai-enhance` adds AI-verified exploitability to scan results
+- **AI remediation** — Automatically generates and validates security patches
+- **Enhanced reachability test coverage** — Expanded validation across all signal types and languages
+- **Improved build & release** — Added Linux tests, reduced wheel sizes
 
-See [CHANGELOG.md](CHANGELOG.md) for the full release notes.
+See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---
 
