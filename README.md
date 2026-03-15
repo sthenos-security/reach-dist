@@ -243,6 +243,32 @@ Supports code patches (CWE), dependency upgrades (CVE), config changes, and secr
 
 See `reachctl enzo --help` and `reachctl primer` for the full command reference.
 
+### 3. Bring Your Own Model (Enterprise / Air-Gapped)
+
+For organizations that must keep code on-premises, REACHABLE connects to any pre-existing Ollama or OpenAI-compatible model endpoint. You provide the running model; REACHABLE connects to it.
+
+```bash
+# Quick setup (local machine — auto-detect resources, pull best model)
+reachctl enzo setup
+
+# Custom endpoint (shared GPU server, Kubernetes, etc.)
+export ENZO_LOCAL_ENDPOINT=http://gpu-box.internal:11434
+export ENZO_LOCAL_MODEL=qwen2.5-coder:32b
+reachctl enzo analyze ~/src/myapp --mode local
+reachctl enzo run ~/src/myapp --mode local
+```
+
+Or configure per-repo in `.reachable.yml`:
+
+```yaml
+enzo:
+  mode: local
+  local_endpoint: http://gpu-box.internal:11434
+  local_model: qwen2.5-coder:32b
+```
+
+The scan pipeline (`--ai-enhance`) uses cloud providers by default for convenience. For local model analysis, use `reachctl enzo analyze --mode local` after scanning. Health check: `reachctl enzo doctor`.
+
 ---
 
 ## Roadmap
