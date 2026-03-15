@@ -136,19 +136,17 @@ Dashboard opens automatically.
 REACHABLE's call graph tells you which functions are reachable. AI goes deeper — it reads the code and verifies whether the *variable* flowing into the vulnerable sink is actually attacker-controlled. Constant? Config value? Validated input? AI catches what pattern matching can't.
 
 ```bash
-# 1. Get a free API key (one-time)
-#    https://console.groq.com/keys
+# 1. Set any one of these API keys (one-time)
+export GROQ_API_KEY=gsk_...                   # console.groq.com/keys (fast, cheap)
+export OPENAI_API_KEY=sk-...                  # platform.openai.com/api-keys (GPT-4o)
+export ANTHROPIC_API_KEY=sk-ant-...           # console.anthropic.com (highest quality)
+# or store securely: reachctl auth login
 
-# 2. Set the key
-export GROQ_API_KEY=gsk_...
-# or store it securely:
-reachctl auth login
-
-# 3. Scan with AI
+# 2. Scan with AI
 reachctl scan /path/to/your/repo --ai-enhance
 ```
 
-That's it. No local model, no Docker, no setup. The dashboard will show AI verification badges next to each finding.
+That's it. No local model, no Docker, no setup. Set one API key and `--ai-enhance` auto-detects which provider to use. The dashboard will show AI verification badges next to each finding.
 
 Without `--ai-enhance`, scan results are still complete — AI just adds a second verification layer.
 
@@ -209,11 +207,17 @@ A SQL injection in a function called from an HTTP route is reachable — but if 
 
 ```bash
 # Cloud (zero setup — set one API key and go)
-export GROQ_API_KEY=gsk_...                   # free at console.groq.com/keys
-reachctl scan ~/src/myapp --ai-enhance        # AI runs automatically after scan
+export GROQ_API_KEY=gsk_...                   # console.groq.com/keys (fast, cheap)
+export OPENAI_API_KEY=sk-...                  # platform.openai.com/api-keys (GPT-4o)
+export ANTHROPIC_API_KEY=sk-ant-...           # console.anthropic.com (highest quality)
+reachctl scan ~/src/myapp --ai-enhance        # auto-detects whichever key is set
+
+# Explicit provider (for analyze or enzo run):
+reachctl enzo analyze ~/src/myapp --mode cloud --provider groq
+reachctl enzo analyze ~/src/myapp --mode cloud --provider openai
+reachctl enzo analyze ~/src/myapp --mode cloud --provider claude
 
 # Local (fully private — code never leaves your machine)
-reachctl doctor --full                        # install Ollama
 reachctl enzo setup                           # pull model (~20GB, one-time)
 reachctl scan ~/src/myapp --ai-enhance        # auto-detects local model
 ```
@@ -235,7 +239,7 @@ reachctl enzo run ~/src/myapp --dry-run       # preview patches without applying
 reachctl enzo run ~/src/myapp                 # fix all findings
 ```
 
-Supports code patches (CWE), dependency upgrades (CVE), config changes, and secret rotation. Works with local models (Ollama) or cloud APIs (Groq, Claude).
+Supports code patches (CWE), dependency upgrades (CVE), config changes, and secret rotation. Works with local models (Ollama) or cloud APIs (Groq, OpenAI, Claude).
 
 See `reachctl enzo --help` and `reachctl primer` for the full command reference.
 
