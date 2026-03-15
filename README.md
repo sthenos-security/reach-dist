@@ -1,6 +1,6 @@
 # REACHABLE by Sthenos Security
 
-AI-powered reachability analysis. Know exactly which vulnerabilities your code can actually reach — and which ones are noise.
+Powered by AI agents, REACHABLE performs deep code reachability analysis, automated triage, and remediation assistance. As AI-driven threats grow more sophisticated, defenders need equally advanced tools. Know exactly which vulnerabilities are exploitable — and which ones are noise.
 
 One command. Seven signal types. AI-verified results. Full interactive dashboard in 90 seconds.
 
