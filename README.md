@@ -86,13 +86,32 @@ export PATH="$HOME/.reachable/venv/bin:$PATH"
 
 Add to your `~/.zshrc` or `~/.bashrc` to make it permanent.
 
-### 2. Install External Tools
+### 2. First Run — Install Dependencies
+
+The wheel contains only Python code. External tools are installed by `doctor` on first run:
 
 ```bash
 reachctl doctor
 ```
 
-Run once after installation. See [DOCTOR.md](DOCTOR.md) for details.
+Doctor detects what’s missing and installs it automatically:
+
+| Layer | What | Where | How |
+|-------|------|-------|-----|
+| OS libraries | libmagic, libffi | System (Linux only) | `sudo apt-get install` |
+| Managed tools | syft, grype | `~/.reachable/tools/bin/` | Downloads binaries |
+| | semgrep | `~/.reachable/venv/bin/` | pip install |
+| | guarddog | `~/.reachable/guarddog-venv/bin/` | pip install (isolated venv) |
+| Optional | trufflehog | `~/.reachable/tools/bin/` | `doctor --full` (prompts) |
+| | joern | System or `~/.reachable/tools/bin/` | `doctor --full` (needs Java 17+) |
+
+On macOS, OS libraries come from Xcode Command Line Tools (pre-installed). On Linux, doctor uses `sudo apt-get` if available.
+
+Verify after doctor completes:
+
+```bash
+reachctl selftest
+```
 
 ### 3. Scan
 
@@ -110,6 +129,7 @@ Dashboard opens automatically.
 | `--no-ai` | Skip AI/LLM analysis (faster) |
 | `--no-dlp` | Skip DLP/PII analysis |
 | `--ci --fail-on high` | CI mode with threshold gating |
+| `--ai-enhance` | AI-powered reachability refinement (enzo) |
 
 ### 4. Authentication (Recommended)
 
