@@ -269,6 +269,58 @@ detect_environment() {
 }
 
 # -----------------------------------------------------------------------------
+# Install OS Dependencies (Linux only)
+# -----------------------------------------------------------------------------
+install_os_dependencies() {
+    if [[ "$OS" != "linux" ]]; then
+        return 0
+    fi
+
+    print_step "Checking OS dependencies"
+
+    MISSING_PKGS=()
+
+    # libmagic — required by GuardDog (python-magic)
+    if ! ldconfig -p 2>/dev/null | grep -q libmagic; then
+        MISSING_PKGS+=("libmagic1")
+    fi
+
+    # libffi — required by cffi (transitive via cryptography)
+    if ! ldconfig -p 2>/dev/null | grep -q libffi; then
+        MISSING_PKGS+=("libffi-dev")
+    fi
+
+    if [[ ${#MISSING_PKGS[@]} -eq 0 ]]; then
+        print_ok "OS dependencies present"
+        return 0
+    fi
+
+    print_warn "Missing OS packages: ${MISSING_PKGS[*]}"
+
+    if command -v apt-get &>/dev/null; then
+        echo ""
+        echo -e "  ${BOLD}REACHABLE requires these system libraries:${NC}"
+        echo "    sudo apt-get install -y ${MISSING_PKGS[*]}"
+        echo ""
+        if [[ -w /usr/lib ]] || [[ $(id -u) -eq 0 ]]; then
+            # Running as root (e.g. in Docker/CI)
+            apt-get update -qq && apt-get install -y -qq "${MISSING_PKGS[@]}" && \
+                print_ok "OS packages installed" || \
+                print_warn "Auto-install failed — run manually: sudo apt-get install -y ${MISSING_PKGS[*]}"
+        else
+            print_info "Run the command above, then re-run the installer."
+            print_info "In Docker/CI, add to your Dockerfile: RUN apt-get update && apt-get install -y ${MISSING_PKGS[*]}"
+        fi
+    elif command -v yum &>/dev/null; then
+        print_info "Install: sudo yum install -y file-libs libffi-devel"
+    elif command -v apk &>/dev/null; then
+        print_info "Install: apk add libmagic libffi-dev"
+    else
+        print_info "Install libmagic and libffi via your package manager"
+    fi
+}
+
+# -----------------------------------------------------------------------------
 # Setup GitHub CLI
 # -----------------------------------------------------------------------------
 # No GitHub CLI or auth needed — reach-dist is public
@@ -544,6 +596,7 @@ main() {
     fi
     
     detect_environment
+    install_os_dependencies
     handle_existing_install
     download_and_install
     verify_installation
