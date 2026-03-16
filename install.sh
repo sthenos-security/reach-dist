@@ -413,6 +413,8 @@ download_and_install() {
         if [[ "$OS" == "darwin" ]] && command -v brew &>/dev/null; then
             if brew install cosign 2>/dev/null; then
                 print_ok "Installed cosign via Homebrew"
+            else
+                print_warn "cosign install via Homebrew timed out or failed — proceeding"
             fi
         elif [[ "$OS" == "linux" ]]; then
             COSIGN_ARCH=$(uname -m)
@@ -422,12 +424,14 @@ download_and_install() {
                 COSIGN_ARCH="arm64"
             fi
             COSIGN_URL="https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${COSIGN_ARCH}"
-            if curl -fsSL "$COSIGN_URL" -o /tmp/cosign 2>/dev/null; then
+            if curl -fsSL --max-time 15 "$COSIGN_URL" -o /tmp/cosign 2>/dev/null; then
                 chmod +x /tmp/cosign
                 mkdir -p "$HOME/.reachable/tools/bin"
                 mv /tmp/cosign "$HOME/.reachable/tools/bin/cosign"
                 export PATH="$HOME/.reachable/tools/bin:$PATH"
                 print_ok "Installed cosign to ~/.reachable/tools/bin/"
+            else
+                print_warn "cosign download timed out or failed — proceeding"
             fi
         fi
     fi
