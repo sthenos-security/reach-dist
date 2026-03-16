@@ -355,6 +355,7 @@ download_and_install() {
         print_ok "Installation complete"
         if [[ -n "${GITHUB_PATH:-}" ]]; then
             echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
+            echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
         fi
         return
     fi
@@ -490,9 +491,10 @@ download_and_install() {
     # Cleanup
     rm -rf "$DOWNLOAD_DIR"
 
-    # If running in GitHub Actions, add venv to PATH for subsequent steps
+    # If running in GitHub Actions, add venv + tools to PATH for subsequent steps
     if [[ -n "${GITHUB_PATH:-}" ]]; then
         echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
     fi
 }
 
