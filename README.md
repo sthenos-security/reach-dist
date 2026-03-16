@@ -74,8 +74,9 @@ curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/in
 |--------|-------------|
 | `--update`, `-u` | Upgrade existing installation (backs up data) |
 | `--clean` | Remove existing data before install |
-| `--version`, `-v` | Install a specific version |
+| `--version`, `-v` | Install a specific version (e.g., `1.0.0b35`) |
 | `--wheel`, `-w` | Install from a local wheel file |
+| `--list`, `-l` | List available releases |
 
 ### Upgrade
 
@@ -200,7 +201,9 @@ Every release is signed and checksummed. The installer verifies both automatical
 
 **Cosign** — verified if `cosign` is installed. Keyless OIDC signatures via [Sigstore](https://sigstore.dev), tied to the GitHub Actions workflow that built the wheel.
 
-Checksums and signature bundles for all releases are in `wheels/v<version>/`.
+Checksums and signature bundles are attached to each [GitHub Release](https://github.com/sthenos-security/reach-dist/releases).
+
+List available releases: `./install.sh --list`
 
 ---
 
