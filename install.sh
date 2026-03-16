@@ -76,6 +76,61 @@ print(tag.lstrip('v'))
 " GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 }
 
+list_releases() {
+    local api_url="https://api.github.com/repos/${REPO}/releases"
+    local response
+
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        response=$(curl -sL -H "Authorization: Bearer ${GITHUB_TOKEN}" "$api_url")
+    else
+        response=$(curl -sL "$api_url")
+    fi
+
+    # Check installed version
+    local installed="(not installed)"
+    if [[ -f "$HOME/.reachable/venv/bin/reachctl" ]]; then
+        installed=$($HOME/.reachable/venv/bin/reachctl version 2>/dev/null | head -1 || echo "unknown")
+    fi
+
+    echo ""
+    echo "  REACHABLE — Available Releases"
+    echo "  ══════════════════════════════════════════"
+    echo "  Installed: $installed"
+    echo ""
+
+    echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if isinstance(data, dict):
+    print('  Error:', data.get('message', 'unknown'))
+    sys.exit(1)
+if not isinstance(data, list):
+    print('  No releases found')
+    sys.exit(0)
+for i, rel in enumerate(data[:10]):
+    tag = rel.get('tag_name', '?')
+    name = rel.get('name', '')
+    date = rel.get('published_at', '')[:10]
+    pre = ' (pre-release)' if rel.get('prerelease') else ''
+    latest = ' ← latest' if i == 0 else ''
+    assets = [a['name'] for a in rel.get('assets', []) if a['name'].endswith('.whl')]
+    platforms = []
+    for a in assets:
+        if 'macosx' in a: platforms.append('macOS')
+        elif 'manylinux' in a: platforms.append('Linux')
+        elif 'win' in a: platforms.append('Windows')
+    plat_str = ', '.join(sorted(set(platforms))) if platforms else 'no wheels'
+    print(f'  {tag:20} {date}  [{plat_str}]{pre}{latest}')
+if len(data) > 10:
+    print(f'  ... and {len(data) - 10} older releases')
+"
+
+    echo ""
+    echo "  Install a specific version:"
+    echo "    ./install.sh --version 1.0.0b35"
+    echo ""
+}
+
 VERSION=""
 WHEEL_VERSION=""
 
@@ -114,16 +169,23 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --update, -u       Upgrade existing installation (backs up data)"
             echo "  --clean            Remove existing data before install"
-            echo "  --version, -v VER  Install specific version (e.g., 1.0.0-beta10)"
+            echo "  --version, -v VER  Install specific version (e.g., 1.0.0b35)"
             echo "  --wheel, -w FILE   Install from local wheel file (skips download)"
+            echo "  --list, -l         List available releases"
             echo "  --help, -h         Show this help"
             echo ""
             echo "Examples:"
-            echo "  ./install.sh                    # Fresh install (prompts for auth)"
+            echo "  ./install.sh                    # Fresh install (latest release)"
+            echo "  ./install.sh --list             # Show available versions"
             echo "  ./install.sh --update           # Upgrade with backup"
             echo "  ./install.sh --clean            # Clean install"
+            echo "  ./install.sh --version 1.0.0b35 # Install specific version"
             echo "  ./install.sh --wheel ./file.whl # Local wheel install"
             echo ""
+            exit 0
+            ;;
+        --list|-l)
+            list_releases
             exit 0
             ;;
         *)
@@ -553,7 +615,11 @@ print_success() {
         echo "    $BACKUP_DIR"
         echo ""
     fi
-    echo -e "  ${BOLD}Future Upgrades:${NC}"
+    echo -e "  ${BOLD}Version:${NC}"
+    echo "    Installed: v${VERSION}"
+    echo "    Check for updates:  ./install.sh --list"
+    echo ""
+    echo -e "  ${BOLD}Upgrade:${NC}"
     echo "    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update"
     echo ""
     echo -e "  ${BOLD}Support:${NC} info@sthenosec.com"
