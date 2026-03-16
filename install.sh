@@ -408,7 +408,31 @@ download_and_install() {
         print_warn "Could not fetch checksums — skipping SHA-256 check"
     fi
 
-    # ── Cosign signature verification (optional, skipped if cosign not installed) ──
+    # ── Cosign: auto-install if missing ──────────────────────────────────────
+    if ! command -v cosign &>/dev/null; then
+        if [[ "$OS" == "darwin" ]] && command -v brew &>/dev/null; then
+            if brew install cosign 2>/dev/null; then
+                print_ok "Installed cosign via Homebrew"
+            fi
+        elif [[ "$OS" == "linux" ]]; then
+            COSIGN_ARCH=$(uname -m)
+            if [[ "$COSIGN_ARCH" == "x86_64" ]]; then
+                COSIGN_ARCH="amd64"
+            elif [[ "$COSIGN_ARCH" == "aarch64" ]]; then
+                COSIGN_ARCH="arm64"
+            fi
+            COSIGN_URL="https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${COSIGN_ARCH}"
+            if curl -fsSL "$COSIGN_URL" -o /tmp/cosign 2>/dev/null; then
+                chmod +x /tmp/cosign
+                mkdir -p "$HOME/.reachable/tools/bin"
+                mv /tmp/cosign "$HOME/.reachable/tools/bin/cosign"
+                export PATH="$HOME/.reachable/tools/bin:$PATH"
+                print_ok "Installed cosign to ~/.reachable/tools/bin/"
+            fi
+        fi
+    fi
+
+    # ── Cosign signature verification ─────────────────────────────────────────
     COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
     BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${COSIGN_BUNDLE}"
     if command -v cosign &>/dev/null; then
@@ -427,7 +451,8 @@ download_and_install() {
             print_warn "Could not fetch cosign bundle — skipping signature check"
         fi
     else
-        print_info "cosign not installed — skipping signature check (SHA-256 verified)"
+        print_warn "cosign not available — signature check skipped (SHA-256 verified)"
+        print_info "Install cosign for full supply chain verification: https://docs.sigstore.dev"
     fi
 
     # Uninstall previous version
