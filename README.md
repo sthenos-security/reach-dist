@@ -210,7 +210,7 @@ Enzo adds two AI-powered capabilities on top of the core scan. Both are optional
 
 ### 1. AI Reachability Analysis
 
-The call graph determines which *functions* are reachable. AI goes one level deeper and determines whether the *variable* flowing into the vulnerable function is actually exploitable.
+AI goes one level deeper and determines whether the *variable* flowing into the vulnerable function is actually exploitable.
 
 A SQL injection in a function called from an HTTP route is reachable — but if the variable is a hardcoded constant, it's a false positive. AI reads your code and makes this distinction for CWE, secrets, DLP, and AI/LLM findings.
 
