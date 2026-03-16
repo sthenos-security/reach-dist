@@ -369,8 +369,8 @@ download_and_install() {
     print_info "Release:    v$VERSION"
     print_info "File:       $WHEEL_FILE"
     
-    WHEEL_URL="https://raw.githubusercontent.com/${REPO}/main/wheels/v${VERSION}/${WHEEL_FILE}"
-    if ! curl -fsSL "$WHEEL_URL" -o "$WHEEL_FILE"; then
+    WHEEL_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${WHEEL_FILE}"
+    if ! curl -fsSL -L "$WHEEL_URL" -o "$WHEEL_FILE"; then
         print_error "Download failed"
         echo ""
         echo "  URL: $WHEEL_URL"
@@ -386,8 +386,8 @@ download_and_install() {
 
     # ── SHA-256 checksum verification ────────────────────────────────────────
     print_step "Verifying integrity"
-    CHECKSUM_URL="https://raw.githubusercontent.com/${REPO}/main/wheels/v${VERSION}/checksums.sha256"
-    if curl -fsSL "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
+    CHECKSUM_URL="https://github.com/${REPO}/releases/download/v${VERSION}/checksums.sha256"
+    if curl -fsSL -L "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
         if grep -q "$WHEEL_FILE" checksums.sha256; then
             EXPECTED=$(grep "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
             if command -v sha256sum &>/dev/null; then
@@ -410,9 +410,9 @@ download_and_install() {
 
     # ── Cosign signature verification (optional, skipped if cosign not installed) ──
     COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
-    BUNDLE_URL="https://raw.githubusercontent.com/${REPO}/main/wheels/v${VERSION}/${COSIGN_BUNDLE}"
+    BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${COSIGN_BUNDLE}"
     if command -v cosign &>/dev/null; then
-        if curl -fsSL "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
+        if curl -fsSL -L "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
             if cosign verify-blob \
                 --bundle "$COSIGN_BUNDLE" \
                 --certificate-identity-regexp "https://github.com/sthenos-security/" \
