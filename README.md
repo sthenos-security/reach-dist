@@ -8,7 +8,8 @@ One command. Seven signal types. AI-verified results. Full interactive dashboard
 
 ## What's New in v1.0.0-beta35
 
-- **AI reachability analysis** — `--ai-enhance` adds AI-verified exploitability to scan results
+- **AI reachability analysis** — Runs automatically when a provider key is configured. Use `--no-ai-taint` to skip, `--deep-ai` for high-cost deep mode (also reviews NOT_REACHABLE findings).
+- **Tree-sitter call graph** — Go, JS/TS, and Java call graph parsing via tree-sitter (fast, no JVM required)
 - **AI remediation** — Automatically generates and validates security patches
 - **Enhanced reachability test coverage** — Expanded validation across all signal types and languages
 - **Improved build & release** — Added Linux tests, reduced wheel sizes
@@ -139,27 +140,25 @@ Dashboard opens automatically.
 | Flag | Effect |
 |------|--------|
 | `--debug` | Verbose output with timestamps |
-| `--no-ai` | Skip AI/LLM analysis (faster) |
 | `--no-dlp` | Skip DLP/PII analysis |
 | `--ci --fail-on high` | CI mode with threshold gating |
-| `--ai-enhance` | AI-verified reachability (reduces false positives) |
+| `--no-ai-taint` | Skip AI taint oracle even if a provider key is set |
+| `--deep-ai` | AI taint on NOT_REACHABLE findings too (higher cost) |
 
-### 4. Reduce False Positives with AI (Optional)
+### 4. AI Reachability (Automatic)
 
-Add `--ai-enhance` to any scan and AI performs deeper code analysis to significantly reduce false positives. It auto-detects which provider to use.
-
-Set up an API key in your environment or store it in your local secret store (keychain):
+AI taint analysis runs automatically when a provider key is configured. Set one key and every scan gets AI verification:
 
 ```bash
 export GROQ_API_KEY=gsk_...
-reachctl scan /path/to/your/repo --ai-enhance
+reachctl scan /path/to/your/repo
 ```
 
 Supported providers: Groq (`GROQ_API_KEY`), OpenAI (`OPENAI_API_KEY`), Anthropic (`ANTHROPIC_API_KEY`), or `reachctl auth login` for keychain storage.
 
-The dashboard shows AI verification badges next to each finding. Without `--ai-enhance`, scan results are still complete — AI adds a second verification layer.
+The startup banner confirms which provider is active. The dashboard shows AI verification badges next to each finding. Use `--no-ai-taint` to skip AI even when a key is set. Use `--deep-ai` to also analyze NOT_REACHABLE findings (higher cost, opt-in).
 
-> **AI Data Disclosure:** When using `--ai-enhance` with a cloud provider, REACHABLE sends code snippets surrounding each security finding (typically 10–30 lines) and finding metadata (file path, line number, finding type) to the selected LLM API for analysis. Full source files and your complete repository are never sent. Without `--ai-enhance`, no source code leaves your machine. Your data is governed by your cloud LLM provider's terms of service and data retention policies. For fully private analysis with no external data transfer, use a local model via `reachctl enzo analyze --mode local`.
+> **AI Data Disclosure:** When AI taint runs with a cloud provider, REACHABLE sends code snippets surrounding each security finding (typically 10–30 lines) and finding metadata (file path, line number, finding type) to the selected LLM API for analysis. Full source files and your complete repository are never sent. Without a configured key, no source code leaves your machine. Your data is governed by your cloud LLM provider's terms of service and data retention policies. For fully private analysis with no external data transfer, use a local model via `reachctl enzo analyze --mode local`.
 
 ### 5. Authentication (Recommended)
 
@@ -188,7 +187,7 @@ Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins:
 | GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) | `.gitlab-ci.yml` (repo root) |
 | Jenkins | [`Jenkinsfile`](jenkins/Jenkinsfile) | `Jenkinsfile` (repo root) |
 
-All templates auto-detect AI reachability: if `GROQ_API_KEY` is set as a secret/variable, `--ai-enhance` is added to the scan automatically. No key = scan still works, just without AI.
+All templates auto-detect AI reachability: if `GROQ_API_KEY` (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) is set as a secret/variable, AI taint runs automatically. No key = scan still works, just without AI.
 
 The testbed repos are forkable — fork one, push, and see REACHABLE scan results immediately.
 
@@ -223,16 +222,18 @@ A SQL injection in a function called from an HTTP route is reachable — but if 
 export GROQ_API_KEY=gsk_...                   # console.groq.com/keys (fast, cheap)
 export OPENAI_API_KEY=sk-...                  # platform.openai.com/api-keys (GPT-4o)
 export ANTHROPIC_API_KEY=sk-ant-...           # console.anthropic.com (highest quality)
-reachctl scan ~/src/myapp --ai-enhance        # auto-detects whichever key is set
+reachctl scan ~/src/myapp                     # AI runs automatically, auto-detects key
+reachctl scan ~/src/myapp --deep-ai           # also analyze NOT_REACHABLE (higher cost)
+reachctl scan ~/src/myapp --no-ai-taint       # skip AI even though key is set
 
-# Explicit provider (for analyze or enzo run):
+# Explicit provider (for standalone analyze or enzo run):
 reachctl enzo analyze ~/src/myapp --mode cloud --provider groq
 reachctl enzo analyze ~/src/myapp --mode cloud --provider openai
 reachctl enzo analyze ~/src/myapp --mode cloud --provider claude
 
 # Local (fully private — code never leaves your machine)
 reachctl enzo setup                           # pull model (~20GB, one-time)
-reachctl scan ~/src/myapp --ai-enhance        # auto-detects local model
+reachctl scan ~/src/myapp                     # auto-detects local model
 ```
 
 Results appear in the scan log and as verification badges in the dashboard.
@@ -280,7 +281,7 @@ enzo:
   local_model: qwen2.5-coder:32b
 ```
 
-The scan pipeline (`--ai-enhance`) uses cloud providers by default for convenience. For local model analysis, use `reachctl enzo analyze --mode local` after scanning. Health check: `reachctl enzo doctor`.
+The scan pipeline uses cloud providers by default for convenience (auto-detected from env/keychain). For local model analysis, use `reachctl enzo analyze --mode local` after scanning. Health check: `reachctl enzo doctor`.
 
 ---
 
@@ -288,7 +289,7 @@ The scan pipeline (`--ai-enhance`) uses cloud providers by default for convenien
 
 Active development. Here's where we're headed:
 
-- **Enzo GA** — Production-ready AI reachability analysis (variable-level taint) and AI remediation (automated patching). Invocation pattern detection, dedicated AI/LLM and DLP prompts, `--deep` mode.
+- **Enzo GA** — Production-ready AI reachability analysis (variable-level taint) and AI remediation (automated patching). Invocation pattern detection, dedicated AI/LLM and DLP prompts, `--deep-ai` mode.
 - **RADR** — Runtime Application Detection & Response. Lightweight agent that monitors running workloads and correlates runtime behavior with static scan findings.
 - **Additional languages and build systems** — Expanding reachability analysis to more ecosystems.
 - **Global intelligence cache** — Cross-scan knowledge graph that accelerates repeat scans and shares anonymized threat signals across deployments.
