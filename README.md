@@ -13,8 +13,6 @@ One command. Seven signal types. AI-verified results. Full interactive dashboard
 - **Enhanced reachability test coverage** — Expanded validation across all signal types and languages
 - **Improved build & release** — Added Linux tests, reduced wheel sizes
 
-See [CHANGELOG.md](CHANGELOG.md) for details.
-
 ---
 
 ## What You Get
@@ -106,16 +104,19 @@ The wheel contains only Python code. External tools are installed by `doctor` on
 reachctl doctor
 ```
 
-Doctor detects what’s missing and installs it automatically:
+Doctor runs a six-step system check and installs anything that’s missing:
 
-| Layer | What | Where | How |
-|-------|------|-------|-----|
-| OS libraries | libmagic, libffi | System (Linux only) | `sudo apt-get install` |
-| Managed tools | syft, grype | `~/.reachable/tools/bin/` | Downloads binaries |
-| | semgrep | `~/.reachable/venv/bin/` | pip install |
-| | guarddog | `~/.reachable/guarddog-venv/bin/` | pip install (isolated venv) |
-| Optional | trufflehog | `~/.reachable/tools/bin/` | `doctor --full` (prompts) |
-| | joern | System or `~/.reachable/tools/bin/` | `doctor --full` (needs Java 17+) |
+```
+REACHABLE SYSTEM CHECK
+[1/4] System Resources    — OS, RAM, disk, GPU, Ollama status
+[2/4] Required Tools      — syft, grype, semgrep, guarddog, sandbox (colima/docker)
+[3/4] Git                 — version check and credential status
+[4/5] Optional Enhancements — trufflehog, joern, ollama + local models
+[5/5] Credentials         — GitHub token, MCP token, AI API keys (keychain or env)
+[6/6] Enzo build tools    — mvn, gradle, go, cargo, node, bundle, composer
+```
+
+Missing build tools can be fixed with `reachctl enzo doctor --fix`.
 
 On macOS, OS libraries come from Xcode Command Line Tools (pre-installed). On Linux, doctor uses `sudo apt-get` if available.
 
