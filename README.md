@@ -6,13 +6,13 @@ One command. Seven signal types. AI-verified results. Full interactive dashboard
 
 ---
 
-## What's New in v1.0.0-beta35
+## What's New in v1.0.0-beta36
 
-- **AI reachability analysis** — Runs automatically when a provider key is configured. Use `--no-ai-taint` to skip, `--deep-ai` for high-cost deep mode (also reviews NOT_REACHABLE findings).
-- **Tree-sitter call graph** — Go, JS/TS, and Java call graph parsing via tree-sitter (fast, no JVM required)
-- **AI remediation** — Automatically generates and validates security patches
-- **Enhanced reachability test coverage** — Expanded validation across all signal types and languages
-- **Improved build & release** — Added Linux tests, reduced wheel sizes
+- **AI taint analysis auto-runs** — Set `GROQ_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` and AI verification runs on every scan automatically. No extra flags needed. Use `--no-ai-taint` to opt out, `--deep-ai` to go deeper (also reviews NOT_REACHABLE findings at higher cost).
+- **Tree-sitter call graph — no JVM** — Go, JS/TS/JSX/TSX, and Java call graph analysis via tree-sitter (~1 MB, sub-100 ms). Joern is gone. No Java 17 required.
+- **Scan accuracy fixes** — CVE risk badges now show demoted risk (CRITICAL+NOT_REACHABLE → MEDIUM), not raw severity. Compose scanner secret findings classified correctly. Filtered count banner explains sandbox vs DB discrepancy.
+- **`syft-exclude.txt`** — Per-repo exclude file for Syft/Grype CVE scanning, alongside the existing semgrep and guarddog exclude files. All three shown in the Coverage tab.
+- **Cleaner CLI** — `--ai-enhance` deprecated (AI auto-runs), `--deep` renamed to `--deep-ai`, `--no-ai` removed.
 
 ---
 
@@ -45,11 +45,20 @@ REACHABLE performs multi-signal reachability analysis across your entire applica
 
 ---
 
-## Supported Languages
+## Supported Languages & Frameworks
 
-Python, JavaScript/TypeScript, Go, Java
+Full analysis — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM, DLP — works across these languages and frameworks.
 
-Full analysis — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM, DLP — works across these languages. Additional languages and build systems are on the [roadmap](#roadmap).
+| Language | Frameworks with Entrypoint + Dead Code Detection |
+|----------|--------------------------------------------------|
+| **Python** | Flask, FastAPI, Django (FBV, CBV, DRF ViewSets, `@api_view`, `@action`, `router.register()`), Pydantic |
+| **JavaScript / TypeScript** | Express, Fastify (routes, plugins, `fastify.register()`), NestJS (`@Controller`, `@Get`/`@Post`, `@Injectable`, AppModule resolution), React (JSX component mounting) |
+| **Go** | Echo (`e.GET`, `e.Group`), net/http, Gin |
+| **Java** | Spring Boot (`@RestController`, `@GetMapping`, `@PostMapping`, `@RequestMapping`) |
+
+Reachability analysis uses static call graphs (tree-sitter, no JVM required) to trace from HTTP entrypoints through the call chain to each finding. Functions not reachable from any entrypoint are marked NOT_REACHABLE — cutting noise by 30–40%.
+
+Additional languages and frameworks are on the [roadmap](#roadmap).
 
 ---
 
