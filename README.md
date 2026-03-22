@@ -8,6 +8,9 @@ One command. Seven signal types. AI-verified results. Full interactive dashboard
 
 ## What's New in v1.0.0-beta36
 
+- **Unified signals table** — All 7 signal types (CVE, CWE, Secret, DLP, AI, Malware, Config) now merge into a single `signals` table after ingestion. One schema, one read path, one reachability pass. Custom Semgrep rules for Go/Java DLP, AI, and malware are automatically re-classified from CWE to their correct signal type. Validator, export, and dashboard all read from `signals`.
+- **New Semgrep detection rules** — `sk_live_*` secret patterns (all languages), Python f-string PII logging, hardcoded SSN/credit card constants, Java `System.out` PII exposure, JavaScript XSS via template literals, Java raw socket C2 beacon patterns.
+- **Java reachability fixes** — Private methods in `@RestController` classes are no longer marked as framework entrypoints. Java SECRET enricher verifies `@RestController`/`@Service`/`@Component` annotations before marking secrets as reachable.
 - **AI taint analysis auto-runs** — Set `GROQ_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` and AI verification runs on every scan automatically. No extra flags needed. Use `--no-ai-taint` to opt out, `--deep-ai` to go deeper (also reviews NOT_REACHABLE findings at higher cost).
 - **Tree-sitter call graph — no JVM** — Go, JS/TS/JSX/TSX, and Java call graph analysis via tree-sitter (~1 MB, sub-100 ms). Joern is gone. No Java 17 required.
 - **Scan accuracy fixes** — CVE risk badges now show demoted risk (CRITICAL+NOT_REACHABLE → MEDIUM), not raw severity. Compose scanner secret findings classified correctly. Filtered count banner explains sandbox vs DB discrepancy.
