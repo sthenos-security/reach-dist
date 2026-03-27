@@ -205,6 +205,47 @@ The testbed repos are forkable — fork one, push, and see REACHABLE scan result
 
 ---
 
+## Supply Chain Detonation (Linux)
+
+Every pip and npm package is installed in an isolated sandbox before it reaches your environment. On macOS, this runs locally via Colima/Docker (`reachctl sandbox --init`). On Linux CI/CD runners, we provide a dedicated Firecracker detonation host — KVM-isolated microVMs with hardware-level separation.
+
+### Quick Start
+
+```bash
+# 1. On the detonation host (bare-metal or nested-virt VM):
+curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/detonation/setup-detonation-host.sh | sudo bash
+
+# 2. On your CI runner / dev machine:
+reachctl sandbox --remote <detonation-host-ip>
+
+# 3. Scan with remote detonation:
+reachctl scan /path/to/repo --sandbox-mode remote
+```
+
+### What's Included
+
+| File | Description |
+|------|-------------|
+| [`detonation/setup-detonation-host.sh`](detonation/setup-detonation-host.sh) | One-command Firecracker host setup (installs Firecracker, creates restricted SSH user, generates keypair, builds rootfs) |
+| [`detonation/RUNBOOK.md`](detonation/RUNBOOK.md) | Full operational runbook: architecture, prerequisites, CI/CD config, troubleshooting, security model, teardown |
+| [`cicd-templates/github-actions-detonation.yml`](cicd-templates/github-actions-detonation.yml) | GitHub Actions workflow with remote detonation |
+| [`cicd-templates/gitlab-ci-detonation.yml`](cicd-templates/gitlab-ci-detonation.yml) | GitLab CI pipeline with remote detonation |
+
+### How It Works
+
+1. **Batch install** — all packages in one Firecracker microVM (~60s)
+2. **If clean** — done (zero overhead for safe projects)
+3. **If something fires** — binary search (bisect) isolates the malicious package in ~log₂(N) runs
+4. **Detection signals**: credential theft (honeypot files), network exfiltration (blocked), `.pth` auto-execution, persistence (crontab/bashrc/systemd), obfuscated payloads (base64/exec/eval)
+
+### Security Model
+
+SSH transport with `ForceCommand` — the `detonation` user has no shell access; only the detonation handler binary runs. Host key pinning (`StrictHostKeyChecking=yes`) and machine-id verification detect host replacement or MITM. Firecracker uses KVM hardware virtualization — a 3+ exploit chain is required to escape the VM.
+
+See the full [Runbook](detonation/RUNBOOK.md) for details.
+
+---
+
 ## Release Verification
 
 Every release is signed and checksummed. The installer verifies both automatically.

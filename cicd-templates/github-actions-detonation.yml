@@ -1,0 +1,87 @@
+# .github/workflows/reachable-detonation.yml
+#
+# REACHABLE Supply Chain Detonation — GitHub Actions
+#
+# Scans dependencies and detonates suspicious packages in a remote
+# Firecracker sandbox. Runs on every PR and push to main.
+#
+# Required secrets:
+#   REACHABLE_SANDBOX_HOST  — IP or DNS of the Firecracker detonation host
+#   REACHABLE_SANDBOX_KEY   — Contents of the Ed25519 private key
+#
+# Optional secrets:
+#   REACHABLE_API_KEY       — API key for REACHABLE Cloud dashboard upload
+#   GROQ_API_KEY            — AI taint analysis (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+
+name: REACHABLE Supply Chain Detonation
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+
+permissions:
+  contents: read
+  security-events: write  # For SARIF upload
+
+jobs:
+  detonation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install REACHABLE
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+          echo "$HOME/.reachable/venv/bin" >> $GITHUB_PATH
+
+      - name: Configure Remote Sandbox
+        run: |
+          mkdir -p ~/.reachable ~/.ssh
+          echo "${{ secrets.REACHABLE_SANDBOX_KEY }}" > ~/.reachable/sandbox_key
+          chmod 600 ~/.reachable/sandbox_key
+          # Pre-fetch host key to avoid interactive prompt
+          ssh-keyscan -t ed25519 "${{ secrets.REACHABLE_SANDBOX_HOST }}" >> ~/.reachable/sandbox_known_hosts 2>/dev/null || true
+
+      - name: Scan with Supply Chain Detonation
+        env:
+          REACHABLE_SANDBOX_SSH: ${{ secrets.REACHABLE_SANDBOX_HOST }}
+          REACHABLE_SANDBOX_SSH_KEY: ~/.reachable/sandbox_key
+          REACHABLE_API_KEY: ${{ secrets.REACHABLE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          reachctl scan . \
+            --sandbox-mode remote \
+            --ci \
+            --fail-on high \
+            --format sarif \
+            --output results.sarif
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+
+      - name: Upload to REACHABLE Cloud
+        if: always() && env.REACHABLE_API_KEY != ''
+        env:
+          REACHABLE_API_KEY: ${{ secrets.REACHABLE_API_KEY }}
+        run: reachctl publish --upload || true
+
+      - name: Upload Dashboard Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reachable-dashboard
+          path: ~/.reachable/scans/*/dashboard/
+          retention-days: 30

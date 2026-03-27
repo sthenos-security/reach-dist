@@ -8,11 +8,24 @@ reachctl scan . --ci --fail-on high --sarif results.sarif
 
 ## Templates
 
+### Standard (static analysis + local sandbox)
+
 | Platform | File | Copy to |
 |---|---|---|
 | GitHub Actions | `github-actions.yml` | `.github/workflows/reachable.yml` |
 | GitLab CI | `gitlab-ci.yml` | `.gitlab-ci.yml` (repo root) |
 | Jenkins | `Jenkinsfile` | `Jenkinsfile` (repo root) |
+
+### With Remote Detonation (Firecracker sandbox)
+
+For Linux CI/CD runners with a dedicated detonation host. See [`../detonation/RUNBOOK.md`](../detonation/RUNBOOK.md) for host setup.
+
+| Platform | File | Copy to |
+|---|---|---|
+| GitHub Actions | `github-actions-detonation.yml` | `.github/workflows/reachable-detonation.yml` |
+| GitLab CI | `gitlab-ci-detonation.yml` | `.gitlab-ci.yml` (repo root) |
+
+**Required secrets/variables:** `REACHABLE_SANDBOX_HOST` (IP of detonation host), `REACHABLE_SANDBOX_KEY` (Ed25519 private key).
 
 ## Variables
 
