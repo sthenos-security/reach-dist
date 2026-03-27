@@ -12,23 +12,28 @@
 #   2. Creates a restricted "detonation" system user
 #   3. Generates an Ed25519 SSH keypair for CI runner authentication
 #   4. Configures sshd ForceCommand (no shell access — only detonation handler)
-#   5. Installs the detonation-handler service
+#   5. Installs REACHABLE CLI (the handler ships inside the wheel)
 #   6. Creates a minimal Firecracker rootfs snapshot
 #   7. Prints the private key for you to copy to your CI runner
 #
+# The detection logic (batch→bisect, .pth scanning, YARA rules, event
+# classification) is NOT in this script — it ships inside the reachable
+# wheel and is invoked via `reachctl detonation-host serve`.
+#
 # Usage:
-#   curl -fsSL https://get.sthenosec.com/detonation-host | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/detonation/setup-detonation-host.sh | sudo bash
 #   # — or —
 #   sudo bash setup-detonation-host.sh
 #
 # Requirements:
-#   - Linux x86_64 with KVM support (cat /dev/kvm must exist)
+#   - Linux x86_64 with KVM support (/dev/kvm must exist)
 #   - Root access (sudo)
-#   - Internet access (to download Firecracker binary)
+#   - Python 3.11+ (for reachable wheel)
+#   - Internet access (to download Firecracker binary + REACHABLE wheel)
 #   - ~2GB disk for rootfs snapshot
 #
 # After setup, configure your CI runner:
-#   reachctl sandbox setup --remote <this-host-ip>
+#   reachctl sandbox --remote <this-host-ip>
 #
 set -euo pipefail
 
@@ -39,7 +44,6 @@ DETONATION_HOME="/opt/reachable/detonation"
 HANDLER_BIN="/opt/reachable/bin/detonation-handler"
 SSH_KEY_DIR="/opt/reachable/detonation/.ssh"
 REACHABLE_DIR="/opt/reachable"
-VM_POOL_SIZE="${VM_POOL_SIZE:-4}"
 ROOTFS_SIZE_MB="${ROOTFS_SIZE_MB:-512}"
 
 # Colors
@@ -76,6 +80,20 @@ preflight() {
         warn "/dev/kvm exists but not readable/writable. Fixing permissions..."
         chmod 666 /dev/kvm
     fi
+
+    # Python 3.11+ required for REACHABLE
+    if ! command -v python3 &>/dev/null; then
+        die "Python 3 not found. Install Python 3.11+: apt-get install python3 python3-pip python3-venv"
+    fi
+    local py_version
+    py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    local py_major py_minor
+    py_major=$(echo "$py_version" | cut -d. -f1)
+    py_minor=$(echo "$py_version" | cut -d. -f2)
+    if [[ "$py_major" -lt 3 ]] || [[ "$py_major" -eq 3 && "$py_minor" -lt 11 ]]; then
+        die "Python ${py_version} found but 3.11+ required. Install: apt-get install python3.12"
+    fi
+    ok "Python ${py_version} found"
 
     ok "Preflight checks passed"
 }
@@ -182,6 +200,8 @@ configure_sshd() {
     fi
 
     # Append restricted match block
+    # ForceCommand calls reachctl from the REACHABLE wheel — all detection
+    # logic ships in the wheel, not in this script.
     cat >> "${sshd_config}" <<SSHD
 
 # ─── REACHABLE Detonation Host (managed by setup-detonation-host.sh) ───
@@ -202,561 +222,82 @@ SSHD
         ok "SSHD configured and reloaded"
     else
         err "SSHD config validation failed! Reverting..."
-        # Remove the block we just added
         sed -i '/# ─── REACHABLE Detonation Host/,/# ─── END REACHABLE/d' "${sshd_config}"
         die "SSHD configuration failed. Check ${sshd_config} manually."
     fi
 }
 
-# ─── Install Detonation Handler ──────────────────────────────
-install_handler() {
-    info "Installing detonation handler..."
+# ─── Install REACHABLE CLI ────────────────────────────────────
+#
+# The detonation handler is NOT a standalone script — it ships inside
+# the reachable wheel as `reachctl detonation-host serve`. This ensures:
+#   - Detection logic stays private (compiled in the wheel)
+#   - Handler updates when the wheel updates (no stale scripts)
+#   - YARA rules, severity model, batch→bisect all come from the wheel
+#
+install_reachable() {
+    info "Installing REACHABLE CLI (detonation handler ships inside)..."
 
-    cat > "${HANDLER_BIN}" <<'HANDLER_SCRIPT'
-#!/usr/bin/env python3
-# Copyright © 2026 Sthenos Security. All rights reserved.
-"""
-REACHABLE Detonation Handler — SSH ForceCommand Target
+    # Create a venv for the detonation host
+    local venv_dir="${REACHABLE_DIR}/venv"
 
-This script is the ONLY thing that runs when someone SSHs in as the
-"detonation" user. It reads a JSON job from stdin, detonates packages
-in Firecracker microVMs, and writes JSON results to stdout.
-
-No shell access. No interactive commands. Just detonation.
-"""
-
-import json
-import os
-import subprocess
-import sys
-import tempfile
-import time
-import uuid
-from pathlib import Path
-
-DETONATION_HOME = Path("/opt/reachable/detonation")
-JOBS_DIR = DETONATION_HOME / "jobs"
-LOGS_DIR = DETONATION_HOME / "logs"
-SNAPSHOTS_DIR = DETONATION_HOME / "snapshots"
-
-MAX_PACKAGES = 2000
-MAX_TIMEOUT = 1800  # 30 minutes
-DEFAULT_TIMEOUT = 600
-
-
-def log(msg: str):
-    """Log to stderr (goes to SSH client's stderr) and to file."""
-    ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-    line = f"[{ts}] {msg}"
-    print(line, file=sys.stderr)
-    try:
-        log_file = LOGS_DIR / f"{time.strftime('%Y-%m-%d')}.log"
-        with open(log_file, "a") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
-
-
-def read_request() -> dict:
-    """Read JSON request from stdin."""
-    try:
-        raw = sys.stdin.read()
-        if not raw.strip():
-            return {"error": "Empty input"}
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        return {"error": f"Invalid JSON: {e}"}
-
-
-def validate_request(req: dict) -> str | None:
-    """Validate request, return error string or None."""
-    if "error" in req:
-        return req["error"]
-    packages = req.get("packages", [])
-    if not packages:
-        return "No packages provided"
-    if len(packages) > MAX_PACKAGES:
-        return f"Too many packages: {len(packages)} > {MAX_PACKAGES}"
-    for pkg in packages:
-        if not pkg.get("name"):
-            return "Package missing 'name'"
-        eco = pkg.get("ecosystem", "pip")
-        if eco not in ("pip", "npm"):
-            return f"Unsupported ecosystem: {eco}"
-    return None
-
-
-def detonate_batch(packages: list, timeout: int, mode: str) -> dict:
-    """
-    Run detonation in Firecracker microVM.
-
-    This is the core detonation logic. It:
-    1. Restores a Firecracker snapshot
-    2. Installs packages inside the VM
-    3. Monitors for malicious behavior (network, file, process events)
-    4. Returns structured results
-    """
-    job_id = f"det_{uuid.uuid4().hex[:8]}"
-    job_dir = JOBS_DIR / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-
-    start = time.time()
-    log(f"Job {job_id}: detonating {len(packages)} packages (mode={mode}, timeout={timeout}s)")
-
-    # Write package list for the VM
-    pkg_list_file = job_dir / "packages.json"
-    pkg_list_file.write_text(json.dumps(packages))
-
-    results = []
-    malicious = []
-    tested = 0
-
-    try:
-        # For each ecosystem group, run detonation
-        pip_pkgs = [p for p in packages if p.get("ecosystem", "pip") == "pip"]
-        npm_pkgs = [p for p in packages if p.get("ecosystem") == "npm"]
-
-        if pip_pkgs:
-            pip_result = _detonate_ecosystem(job_id, pip_pkgs, "pip", timeout, mode, job_dir)
-            results.extend(pip_result.get("results", []))
-            malicious.extend(pip_result.get("malicious", []))
-            tested += pip_result.get("tested", 0)
-
-        if npm_pkgs:
-            npm_result = _detonate_ecosystem(job_id, npm_pkgs, "npm", timeout, mode, job_dir)
-            results.extend(npm_result.get("results", []))
-            malicious.extend(npm_result.get("malicious", []))
-            tested += npm_result.get("tested", 0)
-
-    except Exception as e:
-        duration_ms = int((time.time() - start) * 1000)
-        log(f"Job {job_id}: ERROR — {e}")
-        return {
-            "job_id": job_id,
-            "verdict": "ERROR",
-            "duration_ms": duration_ms,
-            "packages_tested": tested,
-            "malicious_packages": malicious,
-            "results": results,
-            "error": str(e),
+    if [[ -d "${venv_dir}" ]] && "${venv_dir}/bin/reachctl" --version &>/dev/null 2>&1; then
+        local current_ver
+        current_ver=$("${venv_dir}/bin/reachctl" --version 2>/dev/null | head -1 || echo "unknown")
+        ok "REACHABLE already installed: ${current_ver}"
+    else
+        info "  Installing REACHABLE via official installer..."
+        # The official installer handles venv creation, version selection,
+        # checksum verification, and cosign signature validation.
+        # It installs into ~/.reachable/venv by default; we override
+        # REACHABLE_HOME so it installs into /opt/reachable instead.
+        export REACHABLE_HOME="${REACHABLE_DIR}"
+        curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash || {
+            die "REACHABLE install failed. Check network access and try again."
         }
+    fi
 
-    duration_ms = int((time.time() - start) * 1000)
-    verdict = "CRITICAL" if malicious else "CLEAN"
-    log(f"Job {job_id}: {verdict} — {tested} tested, {len(malicious)} malicious, {duration_ms}ms")
-
-    return {
-        "job_id": job_id,
-        "verdict": verdict,
-        "duration_ms": duration_ms,
-        "packages_tested": tested,
-        "malicious_packages": malicious,
-        "results": results,
-    }
-
-
-def _detonate_ecosystem(job_id: str, packages: list, ecosystem: str,
-                         timeout: int, mode: str, job_dir: Path) -> dict:
-    """
-    Detonate packages of a single ecosystem in a Firecracker microVM.
-
-    Uses the batch→bisect strategy:
-    1. Install all packages in one VM
-    2. If CRITICAL → binary search to isolate malicious package(s)
-    """
-    results = []
-    malicious = []
-    tested = 0
-
-    # Build install command
-    if ecosystem == "pip":
-        pkg_specs = [f"{p['name']}=={p['version']}" if p.get("version") else p["name"] for p in packages]
-        install_cmd = f"pip install --no-cache-dir {' '.join(pkg_specs)}"
-    else:
-        pkg_specs = [f"{p['name']}@{p['version']}" if p.get("version") else p["name"] for p in packages]
-        install_cmd = f"npm install --no-save {' '.join(pkg_specs)}"
-
-    # Phase 1: Batch install
-    batch_result = _run_in_vm(job_id, install_cmd, ecosystem, timeout, job_dir)
-    tested += 1
-
-    if batch_result["verdict"] == "CLEAN":
-        # All clean — mark each package
-        for pkg in packages:
-            results.append({
-                "package": pkg["name"],
-                "version": pkg.get("version"),
-                "verdict": "CLEAN",
-                "findings": [],
-                "events": [],
-            })
-            tested += 1
-        return {"results": results, "malicious": [], "tested": len(packages)}
-
-    if batch_result["verdict"] == "ERROR":
-        return {"results": [], "malicious": [], "tested": 1, "error": batch_result.get("error")}
-
-    # Phase 2: Bisect to isolate malicious packages
-    if mode == "batch_only":
-        # Don't bisect — just return batch result
-        return {
-            "results": [{"package": "BATCH", "verdict": "CRITICAL",
-                         "findings": batch_result.get("findings", []),
-                         "events": batch_result.get("events", [])}],
-            "malicious": [p["name"] for p in packages],
-            "tested": 1,
-        }
-
-    if mode == "individual" or len(packages) <= 2:
-        # Test each individually
-        for pkg in packages:
-            if ecosystem == "pip":
-                cmd = f"pip install --no-cache-dir {pkg['name']}" + (f"=={pkg['version']}" if pkg.get('version') else "")
-            else:
-                cmd = f"npm install --no-save {pkg['name']}" + (f"@{pkg['version']}" if pkg.get('version') else "")
-
-            r = _run_in_vm(job_id, cmd, ecosystem, timeout, job_dir)
-            tested += 1
-            verdict = r["verdict"]
-            results.append({
-                "package": pkg["name"],
-                "version": pkg.get("version"),
-                "verdict": verdict,
-                "findings": r.get("findings", []),
-                "events": r.get("events", []),
-            })
-            if verdict == "CRITICAL":
-                malicious.append(pkg["name"])
-    else:
-        # Binary search
-        malicious, results, extra_tested = _bisect_packages(
-            job_id, packages, ecosystem, timeout, job_dir
-        )
-        tested += extra_tested
-
-    return {"results": results, "malicious": malicious, "tested": tested}
-
-
-def _bisect_packages(job_id: str, packages: list, ecosystem: str,
-                     timeout: int, job_dir: Path) -> tuple:
-    """Binary search to isolate malicious packages."""
-    if len(packages) <= 1:
-        # Base case — test single package
-        pkg = packages[0]
-        if ecosystem == "pip":
-            cmd = f"pip install --no-cache-dir {pkg['name']}" + (f"=={pkg['version']}" if pkg.get('version') else "")
-        else:
-            cmd = f"npm install --no-save {pkg['name']}" + (f"@{pkg['version']}" if pkg.get('version') else "")
-
-        r = _run_in_vm(job_id, cmd, ecosystem, timeout, job_dir)
-        verdict = r["verdict"]
-        result = {
-            "package": pkg["name"],
-            "version": pkg.get("version"),
-            "verdict": verdict,
-            "findings": r.get("findings", []),
-            "events": r.get("events", []),
-        }
-        mal = [pkg["name"]] if verdict == "CRITICAL" else []
-        return mal, [result], 1
-
-    mid = len(packages) // 2
-    left_half = packages[:mid]
-    right_half = packages[mid:]
-
-    malicious = []
-    results = []
-    tested = 0
-
-    for half in [left_half, right_half]:
-        if ecosystem == "pip":
-            specs = [f"{p['name']}=={p['version']}" if p.get("version") else p["name"] for p in half]
-            cmd = f"pip install --no-cache-dir {' '.join(specs)}"
-        else:
-            specs = [f"{p['name']}@{p['version']}" if p.get("version") else p["name"] for p in half]
-            cmd = f"npm install --no-save {' '.join(specs)}"
-
-        r = _run_in_vm(job_id, cmd, ecosystem, timeout, job_dir)
-        tested += 1
-
-        if r["verdict"] == "CRITICAL":
-            # Recurse into this half
-            sub_mal, sub_results, sub_tested = _bisect_packages(
-                job_id, half, ecosystem, timeout, job_dir
-            )
-            malicious.extend(sub_mal)
-            results.extend(sub_results)
-            tested += sub_tested
-        else:
-            # This half is clean
-            for pkg in half:
-                results.append({
-                    "package": pkg["name"],
-                    "version": pkg.get("version"),
-                    "verdict": "CLEAN",
-                    "findings": [],
-                    "events": [],
-                })
-
-    return malicious, results, tested
-
-
-def _run_in_vm(job_id: str, install_cmd: str, ecosystem: str,
-               timeout: int, job_dir: Path) -> dict:
-    """
-    Execute install command in a Firecracker microVM and collect events.
-
-    Returns dict with verdict, findings, events, error.
-    """
-    vm_id = f"{job_id}_{uuid.uuid4().hex[:4]}"
-
-    # Find latest snapshot
-    snapshot_dir = SNAPSHOTS_DIR / "latest"
-    if not snapshot_dir.exists():
-        return {"verdict": "ERROR", "error": "No Firecracker snapshot available. Run: reachctl detonation-host rebuild"}
-
-    # Build VM config
-    vm_config = {
-        "vm_id": vm_id,
-        "snapshot": str(snapshot_dir),
-        "install_cmd": install_cmd,
-        "ecosystem": ecosystem,
-        "timeout": timeout,
-    }
-
-    config_file = job_dir / f"{vm_id}.json"
-    config_file.write_text(json.dumps(vm_config))
-
-    try:
-        # Launch Firecracker with jailer
-        # The actual VM orchestration uses firecracker API socket
-        # This is a simplified version — production uses the pool manager
-        result = subprocess.run(
-            [
-                str(DETONATION_HOME / "vm-runner.sh"),
-                str(config_file),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout + 30,  # Grace period
-        )
-
-        if result.returncode != 0:
-            return {
-                "verdict": "ERROR",
-                "error": f"VM execution failed: {result.stderr[:500]}",
-                "findings": [],
-                "events": [],
-            }
-
-        # Parse VM output — vm-runner.sh outputs JSON to stdout
-        try:
-            vm_output = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return {
-                "verdict": "ERROR",
-                "error": f"Invalid VM output: {result.stdout[:500]}",
-                "findings": [],
-                "events": [],
-            }
-
-        return {
-            "verdict": vm_output.get("verdict", "ERROR"),
-            "findings": vm_output.get("findings", []),
-            "events": vm_output.get("events", []),
-        }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "verdict": "ERROR",
-            "error": f"VM timed out after {timeout}s",
-            "findings": [],
-            "events": [],
-        }
-    except FileNotFoundError:
-        return {
-            "verdict": "ERROR",
-            "error": "vm-runner.sh not found. Run: reachctl detonation-host rebuild",
-            "findings": [],
-            "events": [],
-        }
-
-
-def main():
-    """Entry point — ForceCommand target."""
-    JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Read request from stdin
-    req = read_request()
-
-    # Validate
-    err = validate_request(req)
-    if err:
-        log(f"Validation error: {err}")
-        json.dump({
-            "job_id": "",
-            "verdict": "ERROR",
-            "duration_ms": 0,
-            "packages_tested": 0,
-            "error": err,
-        }, sys.stdout)
-        sys.exit(1)
-
-    # Extract parameters
-    packages = req["packages"]
-    mode = req.get("mode", "batch_bisect")
-    timeout = min(req.get("timeout_seconds", DEFAULT_TIMEOUT), MAX_TIMEOUT)
-
-    log(f"Received detonation request: {len(packages)} packages, mode={mode}")
-
-    # Run detonation
-    result = detonate_batch(packages, timeout, mode)
-
-    # Write result to stdout
-    json.dump(result, sys.stdout)
-    sys.stdout.flush()
-
-
-if __name__ == "__main__":
-    main()
-HANDLER_SCRIPT
-
-    chmod +x "${HANDLER_BIN}"
-    chown root:root "${HANDLER_BIN}"
-    ok "Detonation handler installed at ${HANDLER_BIN}"
-}
-
-# ─── Create VM Runner Script ─────────────────────────────────
-install_vm_runner() {
-    info "Installing VM runner script..."
-
-    cat > "${DETONATION_HOME}/vm-runner.sh" <<'VM_RUNNER'
+    # Create the handler shim that ForceCommand calls.
+    # This thin wrapper delegates to reachctl from the wheel.
+    cat > "${HANDLER_BIN}" <<'HANDLER_SHIM'
 #!/usr/bin/env bash
-# Firecracker VM runner — launches a microVM from snapshot, runs install,
-# collects sandbox events, outputs JSON to stdout.
+# REACHABLE Detonation Handler — ForceCommand shim
 #
-# Usage: vm-runner.sh <config.json>
+# This script is the ONLY thing that runs when someone SSHs in as the
+# "detonation" user. It delegates to `reachctl detonation-host serve`
+# which ships inside the REACHABLE wheel.
 #
+# No detection logic lives here — it's all in the wheel.
+# Update the handler by re-running the installer:
+#   curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | REACHABLE_HOME=/opt/reachable bash -s -- --update
+
 set -euo pipefail
 
-CONFIG_FILE="$1"
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo '{"verdict":"ERROR","error":"Config file not found"}'
+VENV="/opt/reachable/venv"
+REACHCTL="${VENV}/bin/reachctl"
+
+if [[ ! -x "${REACHCTL}" ]]; then
+    echo '{"verdict":"ERROR","error":"reachctl not found. Re-run setup-detonation-host.sh or install via install.sh","packages_tested":0}' >&2
     exit 1
 fi
 
-VM_ID=$(jq -r '.vm_id' "$CONFIG_FILE")
-SNAPSHOT=$(jq -r '.snapshot' "$CONFIG_FILE")
-INSTALL_CMD=$(jq -r '.install_cmd' "$CONFIG_FILE")
-ECOSYSTEM=$(jq -r '.ecosystem' "$CONFIG_FILE")
-TIMEOUT=$(jq -r '.timeout' "$CONFIG_FILE")
+# Delegate to the wheel's detonation handler.
+# stdin = JSON job payload, stdout = JSON results
+exec "${REACHCTL}" detonation-host serve
+HANDLER_SHIM
 
-WORK_DIR="/tmp/firecracker/${VM_ID}"
-SOCKET="${WORK_DIR}/firecracker.sock"
-LOG_FILE="${WORK_DIR}/firecracker.log"
+    chmod +x "${HANDLER_BIN}"
+    chown root:root "${HANDLER_BIN}"
 
-mkdir -p "${WORK_DIR}"
-
-# Copy rootfs (CoW if filesystem supports it)
-cp --reflink=auto "${SNAPSHOT}/rootfs.ext4" "${WORK_DIR}/rootfs.ext4"
-
-# Create Firecracker config
-cat > "${WORK_DIR}/vm-config.json" <<VMCFG
-{
-  "boot-source": {
-    "kernel_image_path": "${SNAPSHOT}/vmlinux",
-    "boot_args": "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/overlay-init"
-  },
-  "drives": [{
-    "drive_id": "rootfs",
-    "path_on_host": "${WORK_DIR}/rootfs.ext4",
-    "is_root_device": true,
-    "is_read_only": false
-  }],
-  "machine-config": {
-    "vcpu_count": 2,
-    "mem_size_mib": 1024
-  },
-  "network-interfaces": [{
-    "iface_id": "eth0",
-    "guest_mac": "AA:FC:00:00:00:01",
-    "host_dev_name": "fc-${VM_ID}-tap0"
-  }]
-}
-VMCFG
-
-# Set up tap device for network monitoring (not internet access)
-ip tuntap add "fc-${VM_ID}-tap0" mode tap 2>/dev/null || true
-ip addr add 172.16.0.1/24 dev "fc-${VM_ID}-tap0" 2>/dev/null || true
-ip link set "fc-${VM_ID}-tap0" up 2>/dev/null || true
-
-# Start Firecracker
-firecracker \
-    --api-sock "${SOCKET}" \
-    --config-file "${WORK_DIR}/vm-config.json" \
-    --log-path "${LOG_FILE}" \
-    --level Warning \
-    &
-FC_PID=$!
-
-# Wait for VM to boot (vsock or serial console ready)
-sleep 2
-
-# Send install command via virtio-vsock or serial
-# The guest runs an agent that:
-#   1. Executes the install command
-#   2. Monitors syscalls (seccomp + eBPF)
-#   3. Captures network traffic (tcpdump on lo/eth0)
-#   4. Checks for .pth file creation
-#   5. Reports findings back via vsock
-
-# Simplified: use SSH into the VM via tap interface
-EVENTS_FILE="${WORK_DIR}/events.json"
-FINDINGS_FILE="${WORK_DIR}/findings.json"
-
-# The guest agent writes results to a well-known path on the rootfs
-# After timeout or completion, we read them out
-timeout "${TIMEOUT}" ssh -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -i "${SNAPSHOT}/guest_key" \
-    root@172.16.0.2 \
-    "cd /tmp && ${INSTALL_CMD} 2>&1; /opt/sandbox-agent report" \
-    > "${WORK_DIR}/output.log" 2>&1 || true
-
-# Kill VM
-kill "${FC_PID}" 2>/dev/null || true
-wait "${FC_PID}" 2>/dev/null || true
-
-# Extract results from VM output
-# The sandbox-agent inside the VM outputs a JSON line starting with RESULT:
-RESULT_LINE=$(grep '^RESULT:' "${WORK_DIR}/output.log" | tail -1 | sed 's/^RESULT://')
-if [[ -n "$RESULT_LINE" ]]; then
-    echo "$RESULT_LINE"
-else
-    # No structured output — check for suspicious indicators in log
-    if grep -qE "(curl|wget|nc |/dev/tcp|base64.*decode)" "${WORK_DIR}/output.log"; then
-        echo '{"verdict":"CRITICAL","findings":[{"rule":"SANDBOX_SUSPICIOUS_COMMAND","severity":"CRITICAL","description":"Suspicious commands detected during install"}],"events":[]}'
-    else
-        echo '{"verdict":"CLEAN","findings":[],"events":[]}'
-    fi
-fi
-
-# Cleanup
-ip link delete "fc-${VM_ID}-tap0" 2>/dev/null || true
-rm -rf "${WORK_DIR}"
-VM_RUNNER
-
-    chmod +x "${DETONATION_HOME}/vm-runner.sh"
-    chown "${DETONATION_USER}:${DETONATION_USER}" "${DETONATION_HOME}/vm-runner.sh"
-    ok "VM runner script installed"
+    ok "Handler shim installed at ${HANDLER_BIN}"
+    ok "Detection logic served from: ${venv_dir}/bin/reachctl detonation-host serve"
 }
 
 # ─── Create Rootfs Snapshot ──────────────────────────────────
 create_rootfs() {
     info "Creating minimal rootfs for detonation sandbox..."
 
-    local snapshot_dir="${SNAPSHOTS_DIR}/latest"
+    local snapshot_dir="${DETONATION_HOME}/snapshots/latest"
     mkdir -p "${snapshot_dir}"
 
     # Check if kernel exists
@@ -795,55 +336,10 @@ create_rootfs() {
         # Install Node.js in rootfs
         chroot "${mnt}" bash -c "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs" 2>/dev/null || true
 
-        # Create sandbox agent stub
-        mkdir -p "${mnt}/opt"
-        cat > "${mnt}/opt/sandbox-agent" <<'AGENT'
-#!/usr/bin/env python3
-"""Minimal sandbox agent — monitors installs and reports findings."""
-import json, os, sys
-
-def report():
-    findings = []
-    events = []
-
-    # Check for .pth files with imports
-    import site
-    for sp in site.getsitepackages():
-        if not os.path.isdir(sp):
-            continue
-        for f in os.listdir(sp):
-            if not f.endswith('.pth'):
-                continue
-            path = os.path.join(sp, f)
-            try:
-                content = open(path).read()
-                for line in content.splitlines():
-                    stripped = line.strip()
-                    if stripped.startswith('import '):
-                        danger_ops = []
-                        for d in ['curl', 'wget', 'socket', 'subprocess', 'os.system', 'exec(', 'eval(', 'base64', '/dev/tcp', 'urllib']:
-                            if d in content:
-                                danger_ops.append(d)
-                        sev = 'CRITICAL' if danger_ops else 'HIGH'
-                        findings.append({
-                            'rule': 'PTH_AUTOEXEC',
-                            'severity': sev,
-                            'description': f'.pth file {f} contains import statement' + (f' with danger ops: {danger_ops}' if danger_ops else ''),
-                            'evidence': {'file': f, 'content': content[:500], 'danger_ops': danger_ops},
-                        })
-                        break
-            except Exception:
-                pass
-
-    verdict = 'CRITICAL' if any(f['severity'] == 'CRITICAL' for f in findings) else ('HIGH' if findings else 'CLEAN')
-    result = {'verdict': verdict, 'findings': findings, 'events': events}
-    print(f'RESULT:{json.dumps(result)}')
-
-if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'report':
-        report()
-AGENT
-        chmod +x "${mnt}/opt/sandbox-agent"
+        # Install REACHABLE inside the guest rootfs (for sandbox-agent).
+        # Uses the official installer — we override HOME so it installs
+        # into /root/.reachable inside the chroot.
+        chroot "${mnt}" bash -c "curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | HOME=/root bash" 2>/dev/null || true
 
         # Generate guest SSH key
         ssh-keygen -t ed25519 -f "${snapshot_dir}/guest_key" -N "" -q
@@ -854,7 +350,7 @@ AGENT
 
     else
         warn "debootstrap not found. Install it: apt-get install debootstrap"
-        warn "Rootfs is empty — you'll need to populate it manually."
+        warn "Rootfs is empty — run 'reachctl detonation-host rebuild' after installing debootstrap."
     fi
 
     umount "${mnt}"
@@ -866,11 +362,12 @@ AGENT
 
 # ─── Create Systemd Service ──────────────────────────────────
 install_systemd_service() {
-    info "Installing systemd service for VM pool management..."
+    info "Installing systemd service..."
 
+    # The service calls reachctl from the wheel — not a standalone binary.
     cat > /etc/systemd/system/reachable-detonation.service <<SERVICE
 [Unit]
-Description=REACHABLE Detonation VM Pool Manager
+Description=REACHABLE Detonation Host Service
 After=network.target
 Wants=network.target
 
@@ -879,7 +376,7 @@ Type=simple
 User=${DETONATION_USER}
 Group=${DETONATION_USER}
 WorkingDirectory=${DETONATION_HOME}
-ExecStart=${REACHABLE_DIR}/bin/detonation-pool-manager
+ExecStart=${REACHABLE_DIR}/venv/bin/reachctl detonation-host serve --daemon
 Restart=on-failure
 RestartSec=10
 
@@ -913,9 +410,9 @@ print_summary() {
     echo ""
     echo -e "  Host:       ${BLUE}${host_ip}${NC}"
     echo -e "  User:       ${DETONATION_USER}"
-    echo -e "  Handler:    ${HANDLER_BIN}"
-    echo -e "  Snapshots:  ${SNAPSHOTS_DIR}"
-    echo -e "  Jobs:       ${JOBS_DIR}"
+    echo -e "  Handler:    ${HANDLER_BIN} → reachctl detonation-host serve"
+    echo -e "  Snapshots:  ${DETONATION_HOME}/snapshots"
+    echo -e "  Jobs:       ${DETONATION_HOME}/jobs"
     echo ""
     echo -e "${YELLOW}─── PRIVATE KEY (copy this to your CI runner) ───${NC}"
     echo ""
@@ -926,7 +423,7 @@ print_summary() {
     echo -e "  Save the key above to a file, then run on your CI runner:"
     echo ""
     echo -e "    ${BLUE}# Option 1: Interactive setup${NC}"
-    echo -e "    reachctl sandbox setup --remote ${host_ip}"
+    echo -e "    reachctl sandbox --remote ${host_ip}"
     echo ""
     echo -e "    ${BLUE}# Option 2: Manual setup${NC}"
     echo -e "    mkdir -p ~/.reachable"
@@ -946,7 +443,7 @@ print_summary() {
     echo -e "    export REACHABLE_SANDBOX_SSH_KEY=/path/to/sandbox_key"
     echo ""
     echo -e "  ${BLUE}Test the connection:${NC}"
-    echo -e "    reachctl sandbox status"
+    echo -e "    reachctl sandbox --status"
     echo ""
     echo -e "  ${BLUE}Or test directly with SSH:${NC}"
     echo -e "    echo '{\"packages\":[{\"name\":\"requests\",\"ecosystem\":\"pip\"}]}' | \\"
@@ -954,6 +451,9 @@ print_summary() {
     echo ""
     echo -e "${GREEN}  Fingerprint of public key:${NC}"
     ssh-keygen -lf "${key_path}.pub" 2>/dev/null || true
+    echo ""
+    echo -e "  ${BLUE}Update detection logic:${NC}"
+    echo -e "    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | REACHABLE_HOME=${REACHABLE_DIR} sudo bash -s -- --update"
     echo ""
 }
 
@@ -972,8 +472,7 @@ main() {
     create_detonation_user
     generate_ssh_keys
     configure_sshd
-    install_handler
-    install_vm_runner
+    install_reachable       # Installs wheel + handler shim (no detection logic here)
     create_rootfs
     install_systemd_service
     print_summary
