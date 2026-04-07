@@ -539,8 +539,24 @@ download_and_install() {
         exit 1
     fi
     "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
+
+    # Download hash-pinned constraints (blocks supply chain attacks on dependencies)
+    CONSTRAINTS_URL="https://github.com/${REPO}/releases/download/v${VERSION}/constraints.txt"
+    CONSTRAINTS_FLAG=""
+    if curl -fsSL -L "$CONSTRAINTS_URL" -o constraints.txt 2>/dev/null; then
+        if grep -q "\-\-hash=" constraints.txt 2>/dev/null; then
+            CONSTRAINTS_FLAG="--constraint constraints.txt --require-hashes"
+            print_ok "Dependency constraints verified (hash-pinned)"
+        else
+            CONSTRAINTS_FLAG="--constraint constraints.txt"
+            print_ok "Dependency constraints loaded (version-pinned)"
+        fi
+    else
+        print_warn "No constraints.txt found — dependencies resolved from PyPI (unpinned)"
+    fi
+
     set +e
-    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install "$WHEEL_FILE" 2>&1)
+    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install $CONSTRAINTS_FLAG "$WHEEL_FILE" 2>&1)
     PIP_RC=$?
     set -e
     if [[ $PIP_RC -ne 0 ]]; then
