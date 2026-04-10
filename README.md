@@ -6,16 +6,12 @@ One command. Seven signal types. AI-verified results. Full interactive dashboard
 
 ---
 
-## What's New in v1.0.0-beta36
+## What's New in v1.0.0-beta38
 
-- **Unified signals table** — All 7 signal types (CVE, CWE, Secret, DLP, AI, Malware, Config) now merge into a single `signals` table after ingestion. One schema, one read path, one reachability pass. Custom Semgrep rules for Go/Java DLP, AI, and malware are automatically re-classified from CWE to their correct signal type. Validator, export, and dashboard all read from `signals`.
-- **New Semgrep detection rules** — `sk_live_*` secret patterns (all languages), Python f-string PII logging, hardcoded SSN/credit card constants, Java `System.out` PII exposure, JavaScript XSS via template literals, Java raw socket C2 beacon patterns.
-- **Java reachability fixes** — Private methods in `@RestController` classes are no longer marked as framework entrypoints. Java SECRET enricher verifies `@RestController`/`@Service`/`@Component` annotations before marking secrets as reachable.
-- **AI taint analysis auto-runs** — Set `GROQ_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` and AI verification runs on every scan automatically. No extra flags needed. Use `--no-ai-taint` to opt out, `--deep-ai` to go deeper (also reviews NOT_REACHABLE findings at higher cost).
-- **Tree-sitter call graph — no JVM** — Go, JS/TS/JSX/TSX, and Java call graph analysis via tree-sitter (~1 MB, sub-100 ms). Joern is gone. No Java 17 required.
-- **Scan accuracy fixes** — CVE risk badges now show demoted risk (CRITICAL+NOT_REACHABLE → MEDIUM), not raw severity. Compose scanner secret findings classified correctly. Filtered count banner explains sandbox vs DB discrepancy.
-- **`syft-exclude.txt`** — Per-repo exclude file for Syft/Grype CVE scanning, alongside the existing semgrep and guarddog exclude files. All three shown in the Coverage tab.
-- **Cleaner CLI** — `--ai-enhance` deprecated (AI auto-runs), `--deep` renamed to `--deep-ai`, `--no-ai` removed.
+- **AI taint engine — 100% accuracy** — The intra-function taint engine now passes all test fixtures across Python, Go, Java, and TypeScript with zero false positives and zero false negatives. Improved detection of allowlist guards, path validation patterns, framework-level sanitizers, and config-sourced inputs.
+- **Significantly reduced false positives** — CVE reachability classification redesigned to use Data-Flow Graph edges instead of source-level heuristics. CWE command injection and SQL injection analysis now recognizes more safe patterns. Overall false positive rate reduced substantially on real-world codebases.
+- **Broader AI verification coverage** — AI reachability now provides higher-confidence verdicts with better handling of JavaScript template literals, Java array-form execution, and cross-framework XSS sanitizer recognition.
+- **Updated primer** — `reachctl primer` rewritten with clearer getting-started flow, consolidated credentials reference, and emphasis on AI value for data quality.
 
 ---
 
@@ -26,7 +22,7 @@ REACHABLE performs multi-signal reachability analysis across your entire applica
 **Security Analysis**
 - **CVE / SBOM** — Dependency vulnerabilities with reachability analysis. Know which CVEs your code can actually reach.
 - **CWE** — Code-level weaknesses (injection, auth flaws, crypto misuse) with source-level tracing
-- **Secrets** — Hardcoded credentials, API keys, and tokens with reachability context — is the secret actually used?
+- **Secrets** — Hardcoded credentials, API keys, and tokens with reachability context — is the secret actually used? TruffleHog scans source code only (`.git/`, virtual environments, and `node_modules/` are excluded by default to avoid noise from git history and third-party packages).
 - **Malware** — Static pattern detection + behavioral sandbox analysis. Confirmed vs. suspicious verdicts with package-level attribution.
 - **IaC / Config** — Kubernetes, Docker, and infrastructure misconfigurations mapped to compliance frameworks
 
@@ -191,17 +187,16 @@ reachctl --help       # Quick overview
 
 ## CI/CD Integration
 
-Ready-to-use templates for GitHub Actions, GitLab CI, and Jenkins:
+Ready-to-use, tested CI/CD configurations — fork the testbed repo for your platform and push:
 
-| Platform | Template | Copy to |
+| Platform | Repo | What you get |
 |---|---|---|
-| GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) | `.github/workflows/reachable.yml` |
-| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) | `.gitlab-ci.yml` (repo root) |
-| Jenkins | [`Jenkinsfile`](jenkins/Jenkinsfile) | `Jenkinsfile` (repo root) |
+| GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) | Fork, push, scan runs automatically |
+| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) | Fork, push, scan runs automatically |
 
-All templates auto-detect AI reachability: if `GROQ_API_KEY` (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) is set as a secret/variable, AI taint runs automatically. No key = scan still works, just without AI.
+Both repos contain a working REACHABLE scan pipeline with install, scan, dashboard artifact upload, and optional SARIF reporting. AI reachability runs automatically if `GROQ_API_KEY` (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) is set as a repo secret.
 
-The testbed repos are forkable — fork one, push, and see REACHABLE scan results immediately.
+For Jenkins, see the [`jenkins/`](jenkins/) directory in this repo.
 
 ---
 
