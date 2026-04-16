@@ -6,15 +6,6 @@ One command. Seven signal types. AI-verified results. Full interactive dashboard
 
 ---
 
-## What's New in v1.0.0-beta38
-
-- **AI taint engine — 100% accuracy** — The intra-function taint engine now passes all test fixtures across Python, Go, Java, and TypeScript with zero false positives and zero false negatives. Improved detection of allowlist guards, path validation patterns, framework-level sanitizers, and config-sourced inputs.
-- **Significantly reduced false positives** — CVE reachability classification redesigned to use Data-Flow Graph edges instead of source-level heuristics. CWE command injection and SQL injection analysis now recognizes more safe patterns. Overall false positive rate reduced substantially on real-world codebases.
-- **Broader AI verification coverage** — AI reachability now provides higher-confidence verdicts with better handling of JavaScript template literals, Java array-form execution, and cross-framework XSS sanitizer recognition.
-- **Updated primer** — `reachctl primer` rewritten with clearer getting-started flow, consolidated credentials reference, and emphasis on AI value for data quality.
-
----
-
 ## What You Get
 
 REACHABLE performs multi-signal reachability analysis across your entire application stack and delivers results through an interactive, offline HTML dashboard.
@@ -22,7 +13,7 @@ REACHABLE performs multi-signal reachability analysis across your entire applica
 **Security Analysis**
 - **CVE / SBOM** — Dependency vulnerabilities with reachability analysis. Know which CVEs your code can actually reach.
 - **CWE** — Code-level weaknesses (injection, auth flaws, crypto misuse) with source-level tracing
-- **Secrets** — Hardcoded credentials, API keys, and tokens with reachability context — is the secret actually used? TruffleHog scans source code only (`.git/`, virtual environments, and `node_modules/` are excluded by default to avoid noise from git history and third-party packages).
+- **Secrets** — Hardcoded credentials, API keys, and tokens detected by Gitleaks and Semgrep, with reachability context — is the secret actually used?
 - **Malware** — Static pattern detection + behavioral sandbox analysis. Confirmed vs. suspicious verdicts with package-level attribution.
 - **IaC / Config** — Kubernetes, Docker, and infrastructure misconfigurations mapped to compliance frameworks
 
@@ -55,7 +46,7 @@ Full analysis — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM,
 | **Go** | Echo (`e.GET`, `e.Group`), net/http, Gin |
 | **Java** | Spring Boot (`@RestController`, `@GetMapping`, `@PostMapping`, `@RequestMapping`) |
 
-Reachability analysis uses static call graphs (tree-sitter, no JVM required) to trace from HTTP entrypoints through the call chain to each finding. Functions not reachable from any entrypoint are marked NOT_REACHABLE — cutting noise by 30–40%.
+Reachability analysis uses static call graphs (tree-sitter, no JVM or external toolchain required) to trace from HTTP entrypoints through the call chain to each finding. Functions not reachable from any entrypoint are marked NOT_REACHABLE — cutting noise by 30–40%.
 
 Additional languages and frameworks are on the [roadmap](#roadmap).
 
@@ -81,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/in
 |--------|-------------|
 | `--update`, `-u` | Upgrade existing installation (backs up data) |
 | `--clean` | Remove existing data before install |
-| `--version`, `-v` | Install a specific version (e.g., `1.0.0b35`) |
+| `--version`, `-v` | Install a specific version (e.g., `1.0.0-rc0`) |
 | `--wheel`, `-w` | Install from a local wheel file |
 | `--list`, `-l` | List available releases |
 
@@ -91,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/in
 curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
 ```
 
-> **Beta Notice:** Use `--clean` when upgrading between beta releases to avoid database compatibility issues.
+> **Upgrade Notice:** Use `--clean` when upgrading from a beta release to avoid database compatibility issues.
 
 ---
 
@@ -105,29 +96,15 @@ export PATH="$HOME/.reachable/venv/bin:$PATH"
 
 Add to your `~/.zshrc` or `~/.bashrc` to make it permanent.
 
-### 2. First Run — Install Dependencies
+### 2. First Run — reachctl doctor
 
-The wheel contains only Python code. External tools are installed by `doctor` on first run:
+`doctor` is the single entry point for everything: tool installation, credential setup, AI provider configuration, and system health checks.
 
 ```bash
 reachctl doctor
 ```
 
-Doctor runs a six-step system check and installs anything that’s missing:
-
-```
-REACHABLE SYSTEM CHECK
-[1/4] System Resources    — OS, RAM, disk, GPU, Ollama status
-[2/4] Required Tools      — syft, grype, semgrep, guarddog, sandbox (colima/docker)
-[3/4] Git                 — version check and credential status
-[4/5] Optional Enhancements — trufflehog, joern, ollama + local models
-[5/5] Credentials         — GitHub token, MCP token, AI API keys (keychain or env)
-[6/6] Enzo build tools    — mvn, gradle, go, cargo, node, bundle, composer
-```
-
-Missing build tools can be fixed with `reachctl enzo doctor --fix`.
-
-On macOS, OS libraries come from Xcode Command Line Tools (pre-installed). On Linux, doctor uses `sudo apt-get` if available.
+On first run, doctor installs missing tools automatically (syft, grype, semgrep, guarddog, gitleaks) and walks you through credential setup. In CI/CD, use `reachctl doctor --ci` to read from environment variables without prompts.
 
 Verify after doctor completes:
 
@@ -135,7 +112,23 @@ Verify after doctor completes:
 reachctl selftest
 ```
 
-### 3. Scan
+### 3. Set Up an AI Provider (Recommended)
+
+Set one API key and every scan gets AI-verified results automatically:
+
+```bash
+# Recommended — single key, 300+ models, per-task routing
+reachctl doctor set openrouter-api-key    # openrouter.ai/keys
+
+# Or a specific provider:
+reachctl doctor set anthropic-api-key     # Claude (highest accuracy)
+reachctl doctor set groq-api-key          # Groq (fast, low cost)
+reachctl doctor set openai-api-key        # OpenAI GPT-4o
+```
+
+The startup banner confirms which provider is active. Use `reachctl doctor status` to see all configured credentials.
+
+### 4. Scan
 
 ```bash
 reachctl scan /path/to/your/repo
@@ -147,34 +140,23 @@ Dashboard opens automatically.
 
 | Flag | Effect |
 |------|--------|
-| `--debug` | Verbose output with timestamps |
+| `--verbose` | Detailed output with per-scanner progress |
 | `--no-dlp` | Skip DLP/PII analysis |
 | `--ci --fail-on high` | CI mode with threshold gating |
-| `--no-ai-taint` | Skip AI taint oracle even if a provider key is set |
-| `--deep-ai` | AI taint on NOT_REACHABLE findings too (higher cost) |
+| `--no-ai` | Skip AI taint oracle even if a key is set |
+| `--deep-ai-analysis` | AI source discovery pass (finds issues pattern scanners miss) |
 
-### 4. AI Reachability (Automatic)
+### AI Providers
 
-AI taint analysis runs automatically when a provider key is configured. Set one key and every scan gets AI verification:
+| Provider | RPM | TPM | $/finding (approx) |
+|----------|-----|-----|-------------------|
+| **OpenRouter** (recommended) | 200 | 200K | ~$0.001 |
+| **Claude** | 50–1,000 | 40K–450K | ~$0.003 |
+| **Groq** | 120 | 100K | ~$0.0004 |
+| **OpenAI** | 120+ | 200K+ | ~$0.002 |
+| **Local (Ollama)** | ∞ | ∞ | free |
 
-```bash
-export GROQ_API_KEY=gsk_...
-reachctl scan /path/to/your/repo
-```
-
-Supported providers: Groq (`GROQ_API_KEY`), OpenAI (`OPENAI_API_KEY`), Anthropic (`ANTHROPIC_API_KEY`), or `reachctl auth login` for keychain storage.
-
-The startup banner confirms which provider is active. The dashboard shows AI verification badges next to each finding. Use `--no-ai-taint` to skip AI even when a key is set. Use `--deep-ai` to also analyze NOT_REACHABLE findings (higher cost, opt-in).
-
-> **AI Data Disclosure:** When AI taint runs with a cloud provider, REACHABLE sends code snippets surrounding each security finding (typically 10–30 lines) and finding metadata (file path, line number, finding type) to the selected LLM API for analysis. Full source files and your complete repository are never sent. Without a configured key, no source code leaves your machine. Your data is governed by your cloud LLM provider's terms of service and data retention policies. For fully private analysis with no external data transfer, use a local model via `reachctl enzo analyze --mode local`.
-
-### 5. Authentication (Recommended)
-
-```bash
-reachctl auth login
-```
-
-Stores GitHub and MCP tokens securely in the system keychain. See `reachctl primer` for token scopes and advanced options.
+> **AI Data Disclosure:** When AI runs with a cloud provider, REACHABLE sends code snippets surrounding each finding (typically 10–30 lines) and finding metadata. Full source files are never sent. Without a configured key, no source code leaves your machine. Use `--no-ai` for fully local scans.
 
 ### Reference
 
@@ -187,16 +169,16 @@ reachctl --help       # Quick overview
 
 ## CI/CD Integration
 
-Ready-to-use, tested CI/CD configurations — fork the testbed repo for your platform and push:
+Ready-to-use CI/CD configurations — fork the testbed repo for your platform:
 
 | Platform | Repo | What you get |
 |---|---|---|
 | GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) | Fork, push, scan runs automatically |
 | GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) | Fork, push, scan runs automatically |
 
-Both repos contain a working REACHABLE scan pipeline with install, scan, dashboard artifact upload, and optional SARIF reporting. AI reachability runs automatically if `GROQ_API_KEY` (or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) is set as a repo secret.
+Both repos contain a working REACHABLE scan pipeline with install, scan, dashboard artifact upload, and SARIF reporting. AI reachability runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` is set as a repo secret.
 
-For Jenkins, see the [`jenkins/`](jenkins/) directory in this repo.
+For Jenkins, see the [`jenkins/Jenkinsfile`](jenkins/Jenkinsfile) in this repo — drop it into your repo root and create a Pipeline job.
 
 ---
 
@@ -223,8 +205,10 @@ reachctl scan /path/to/repo --sandbox-mode remote
 |------|-------------|
 | [`detonation/setup-detonation-host.sh`](detonation/setup-detonation-host.sh) | One-command Firecracker host setup (installs Firecracker, creates restricted SSH user, generates keypair, builds rootfs) |
 | [`detonation/RUNBOOK.md`](detonation/RUNBOOK.md) | Full operational runbook: architecture, prerequisites, CI/CD config, troubleshooting, security model, teardown |
-| [`cicd-templates/github-actions-detonation.yml`](cicd-templates/github-actions-detonation.yml) | GitHub Actions workflow with remote detonation |
-| [`cicd-templates/gitlab-ci-detonation.yml`](cicd-templates/gitlab-ci-detonation.yml) | GitLab CI pipeline with remote detonation |
+
+For CI/CD workflows with remote detonation enabled, see the testbed repos:
+- [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) — GitHub Actions with `--sandbox-mode remote`
+- [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) — GitLab CI with `--sandbox-mode remote`
 
 ### How It Works
 
@@ -255,9 +239,9 @@ List available releases: `./install.sh --list`
 
 ---
 
-## Enzo AI Engine (Experimental)
+## Enzo AI Engine
 
-Enzo adds two AI-powered capabilities on top of the core scan. Both are optional — the scan is complete without them.
+Enzo adds AI-powered capabilities on top of the core scan. Both passes are optional — the scan is complete without them.
 
 ### 1. AI Reachability Analysis
 
@@ -266,27 +250,25 @@ AI goes one level deeper and determines whether the *variable* flowing into the 
 A SQL injection in a function called from an HTTP route is reachable — but if the variable is a hardcoded constant, it's a false positive. AI reads your code and makes this distinction for CWE, secrets, DLP, and AI/LLM findings.
 
 ```bash
-# Cloud (zero setup — set one API key and go)
-export GROQ_API_KEY=gsk_...                   # console.groq.com/keys (fast, cheap)
-export OPENAI_API_KEY=sk-...                  # platform.openai.com/api-keys (GPT-4o)
-export ANTHROPIC_API_KEY=sk-ant-...           # console.anthropic.com (highest quality)
-reachctl scan ~/src/myapp                     # AI runs automatically, auto-detects key
-reachctl scan ~/src/myapp --deep-ai           # also analyze NOT_REACHABLE (higher cost)
-reachctl scan ~/src/myapp --no-ai-taint       # skip AI even though key is set
+# Set a key — AI runs automatically on the next scan
+reachctl doctor set openrouter-api-key    # recommended
+reachctl doctor set anthropic-api-key     # Claude (highest accuracy)
+reachctl doctor set groq-api-key          # Groq (fast, cheap)
 
-# Explicit provider (for standalone analyze or enzo run):
-reachctl enzo analyze ~/src/myapp --mode cloud --provider groq
-reachctl enzo analyze ~/src/myapp --mode cloud --provider openai
-reachctl enzo analyze ~/src/myapp --mode cloud --provider claude
+reachctl scan ~/src/myapp                 # AI runs automatically
+reachctl scan ~/src/myapp --deep-ai-analysis  # + AI source discovery pass
+reachctl scan ~/src/myapp --no-ai         # skip AI even though key is set
 
-# Local (fully private — code never leaves your machine)
-reachctl enzo setup                           # pull model (~20GB, one-time)
-reachctl scan ~/src/myapp                     # auto-detects local model
+# Standalone analysis after a scan:
+reachctl analyze ~/src/myapp --provider openrouter
+reachctl analyze ~/src/myapp --mode local  # fully private, Ollama
 ```
 
 Results appear in the scan log and as verification badges in the dashboard.
 
-### 2. AI Remediation
+### 2. AI Remediation (Beta — Cloud Team/Enterprise)
+
+> **Beta Feature:** AI remediation is available to Cloud Team and Enterprise accounts. Contact info@sthenosec.com for access.
 
 Automatically generates, validates, and commits security patches. Each fix is tested in an isolated git worktree before touching your code:
 
@@ -296,28 +278,25 @@ Automatically generates, validates, and commits security patches. Each fix is te
 4. Commit only if all checks pass
 
 ```bash
-reachctl enzo scan ~/src/myapp                # show fixable findings
-reachctl enzo run ~/src/myapp --dry-run       # preview patches without applying
-reachctl enzo run ~/src/myapp                 # fix all findings
+reachctl fix --list                       # show fixable findings
+reachctl fix --all --dry-run              # preview patches without applying
+reachctl fix --all                        # fix all findings
+reachctl fix --id 07d2d96a               # fix one specific finding
 ```
 
-Supports code patches (CWE), dependency upgrades (CVE), config changes, and secret rotation. Works with local models (Ollama) or cloud APIs (Groq, OpenAI, Claude).
-
-See `reachctl enzo --help` and `reachctl primer` for the full command reference.
+Supports code patches (CWE), dependency upgrades (CVE), config changes, and secret rotation.
 
 ### 3. Bring Your Own Model (Enterprise / Air-Gapped)
 
-For organizations that must keep code on-premises, REACHABLE connects to any pre-existing Ollama or OpenAI-compatible model endpoint. You provide the running model; REACHABLE connects to it.
+For organizations that must keep code on-premises, REACHABLE connects to any Ollama or OpenAI-compatible model endpoint.
 
 ```bash
-# Quick setup (local machine — auto-detect resources, pull best model)
-reachctl enzo setup
+# Local machine
+reachctl enzo setup                       # pull best model for your hardware
 
-# Custom endpoint (shared GPU server, Kubernetes, etc.)
-export ENZO_LOCAL_ENDPOINT=http://gpu-box.internal:11434
-export ENZO_LOCAL_MODEL=qwen2.5-coder:32b
-reachctl enzo analyze ~/src/myapp --mode local
-reachctl enzo run ~/src/myapp --mode local
+# Custom endpoint (shared GPU server, Kubernetes)
+export OLLAMA_HOST=http://gpu-box.internal:11434
+reachctl fix --all --mode local
 ```
 
 Or configure per-repo in `.reachable.yml`:
@@ -329,19 +308,19 @@ enzo:
   local_model: qwen2.5-coder:32b
 ```
 
-The scan pipeline uses cloud providers by default for convenience (auto-detected from env/keychain). For local model analysis, use `reachctl enzo analyze --mode local` after scanning. Health check: `reachctl enzo doctor`.
-
 ---
 
 ## Roadmap
 
 Active development. Here's where we're headed:
 
-- **Enzo GA** — Production-ready AI reachability analysis (variable-level taint) and AI remediation (automated patching). Invocation pattern detection, dedicated AI/LLM and DLP prompts, `--deep-ai` mode.
-- **RADR** — Runtime Application Detection & Response. Lightweight agent that monitors running workloads and correlates runtime behavior with static scan findings.
-- **Additional languages and build systems** — Expanding reachability analysis to more ecosystems.
-- **Global intelligence cache** — Cross-scan knowledge graph that accelerates repeat scans and shares anonymized threat signals across deployments.
-- **Multi-tenant SaaS dashboard** — Centralized visibility across teams, repos, and environments. Role-based access, trend analytics, and policy enforcement.
+- **AI Discovery (Beta)** — LLM-powered vulnerability discovery runs alongside traditional scanners as a second independent pass. Finds logic flaws, auth bypasses, and business logic issues that pattern-matching tools miss. Results tagged with purple `Deep` badge in the dashboard.
+- **Zero False Positive Pipeline** — Completing the canonical AppSec workflow: AI discovery → static FP elimination → AI reachability verification → dynamic sandbox confirmation → idiomatic patch generation → test validation → PR. Each stage further filters noise so developers only see confirmed, ready-to-merge fixes.
+- **AI-Powered Remediation GA** — `reachctl fix` generates, validates, and commits security patches. Currently in beta for Cloud Team and Enterprise accounts. Targeting GA in the next release.
+- **REACHABLE Cloud (SaaS)** — Hosted dashboard with team management, multi-repo views, trend analytics, and policy enforcement. Currently in private beta — contact info@sthenosec.com for early access.
+- **RADR Runtime Agent** — Lightweight eBPF agent that correlates runtime behavior with static scan findings. Eliminates the last category of unknown reachability.
+- **Additional Languages** — Expanding reachability analysis to Ruby, Rust, C/C++, and additional frameworks.
+- **CNAPP Integration** — Pre-computed reachability metadata as a build artifact consumed by Wiz, Orca, Prisma, and other CNAPP platforms to enrich runtime attack paths with code-level context.
 
 ---
 

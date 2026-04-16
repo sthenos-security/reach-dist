@@ -9,9 +9,12 @@
 #   REACHABLE_SANDBOX_HOST  — IP or DNS of the Firecracker detonation host
 #   REACHABLE_SANDBOX_KEY   — Contents of the Ed25519 private key
 #
-# Optional secrets:
+# Optional secrets (set any one for AI reachability):
 #   REACHABLE_API_KEY       — API key for REACHABLE Cloud dashboard upload
-#   GROQ_API_KEY            — AI taint analysis (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+#   OPENROUTER_API_KEY      — Recommended: single key, 300+ models (openrouter.ai)
+#   ANTHROPIC_API_KEY       — Claude (highest accuracy)
+#   GROQ_API_KEY            — Groq (fast, low cost)
+#   OPENAI_API_KEY          — OpenAI GPT-4o
 
 name: REACHABLE Supply Chain Detonation
 
@@ -57,14 +60,16 @@ jobs:
           REACHABLE_SANDBOX_SSH: ${{ secrets.REACHABLE_SANDBOX_HOST }}
           REACHABLE_SANDBOX_SSH_KEY: ~/.reachable/sandbox_key
           REACHABLE_API_KEY: ${{ secrets.REACHABLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           reachctl scan . \
             --sandbox-mode remote \
             --ci \
             --fail-on high \
-            --format sarif \
-            --output results.sarif
+            --sarif results.sarif
 
       - name: Upload SARIF to GitHub Security
         if: always()

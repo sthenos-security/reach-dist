@@ -9,9 +9,12 @@
 #   REACHABLE_SANDBOX_HOST  — IP or DNS of the Firecracker detonation host
 #   REACHABLE_SANDBOX_KEY   — Contents of the Ed25519 private key (type: File or Variable)
 #
-# Optional variables:
+# Optional variables (set any one for AI reachability):
 #   REACHABLE_API_KEY       — API key for REACHABLE Cloud dashboard upload
-#   GROQ_API_KEY            — AI taint analysis
+#   OPENROUTER_API_KEY      — Recommended: single key, 300+ models (openrouter.ai)
+#   ANTHROPIC_API_KEY       — Claude (highest accuracy)
+#   GROQ_API_KEY            — Groq (fast, low cost)
+#   OPENAI_API_KEY          — OpenAI GPT-4o
 
 stages:
   - test
@@ -22,6 +25,10 @@ reachable-detonation:
   variables:
     REACHABLE_SANDBOX_SSH: $REACHABLE_SANDBOX_HOST
     REACHABLE_SANDBOX_SSH_KEY: /tmp/sandbox_key
+    OPENROUTER_API_KEY: $OPENROUTER_API_KEY
+    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
+    GROQ_API_KEY: $GROQ_API_KEY
+    OPENAI_API_KEY: $OPENAI_API_KEY
   before_script:
     # Install REACHABLE
     - curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
@@ -39,8 +46,7 @@ reachable-detonation:
         --sandbox-mode remote \
         --ci \
         --fail-on high \
-        --format sarif \
-        --output gl-sast-report.json
+        --sarif gl-sast-report.json
   after_script:
     # Upload to REACHABLE Cloud (if API key set)
     - export PATH="$HOME/.reachable/venv/bin:$PATH"

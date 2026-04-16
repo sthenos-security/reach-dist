@@ -153,7 +153,7 @@ Store as secrets: `REACHABLE_SANDBOX_HOST`, `REACHABLE_SANDBOX_KEY`.
   run: reachctl scan . --sandbox-mode remote --ci --fail-on high
 ```
 
-See `cicd-templates/github-actions-detonation.yml` for the full workflow.
+See `detonation/github-actions-detonation.yml` for the full workflow.
 
 ### GitLab CI
 
@@ -173,7 +173,7 @@ reachable-detonation:
     REACHABLE_SANDBOX_SSH_KEY: ~/.reachable/sandbox_key
 ```
 
-See `cicd-templates/gitlab-ci-detonation.yml` for the full pipeline.
+See `detonation/gitlab-ci-detonation.yml` for the full pipeline.
 
 ---
 
