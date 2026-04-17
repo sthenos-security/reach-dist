@@ -174,7 +174,7 @@ Ready-to-use CI/CD configurations — fork the testbed repo for your platform:
 | Platform | Repo | What you get |
 |---|---|---|
 | GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) | Fork, push, scan runs automatically |
-| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) | Fork, push, scan runs automatically |
+| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/sthenos-security) | Fork, push, scan runs automatically |
 
 Both repos contain a working REACHABLE scan pipeline with install, scan, dashboard artifact upload, and SARIF reporting. AI reachability runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` is set as a repo secret.
 
@@ -208,7 +208,7 @@ reachctl scan /path/to/repo --sandbox-mode remote
 
 For CI/CD workflows with remote detonation enabled, see the testbed repos:
 - [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) — GitHub Actions with `--sandbox-mode remote`
-- [reach-testbed-gitlab](https://gitlab.com/sthenos-security/reach-testbed-gitlab) — GitLab CI with `--sandbox-mode remote`
+- [reach-testbed-gitlab](https://gitlab.com/sthenos-security/sthenos-security) — GitLab CI with `--sandbox-mode remote`
 
 ### How It Works
 
