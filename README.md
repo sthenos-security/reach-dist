@@ -351,6 +351,12 @@ Every report is reviewed and, where confirmed, fed back into our suppression rul
 
 ---
 
+## Third-Party Software
+
+REACHABLE uses open-source tools and libraries. See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for the full list of dependencies, external tools, data sources, and their licenses.
+
+---
+
 ## Support
 
 Email: info@sthenosec.com

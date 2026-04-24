@@ -1,0 +1,93 @@
+THIRD-PARTY SOFTWARE NOTICES
+=============================
+REACHABLE — Sthenos Security
+Last updated: 2026-04-23
+
+REACHABLE uses the following third-party software, either as Python
+dependencies (installed by pip), external CLI tools (invoked via
+subprocess), or runtime assets.
+
+─────────────────────────────────────────────────────────────────────────
+1. PYTHON DEPENDENCIES (installed by pip — not bundled in wheel)
+─────────────────────────────────────────────────────────────────────────
+
+  Package              License           URL
+  ───────────────────  ────────────────  ──────────────────────────────────────
+  click                BSD-3-Clause      https://github.com/pallets/click
+  requests             Apache-2.0        https://github.com/psf/requests
+  PyYAML               MIT               https://github.com/yaml/pyyaml
+  pydantic             MIT               https://github.com/pydantic/pydantic
+  httpx                BSD-3-Clause      https://github.com/encode/httpx
+  cryptography         Apache-2.0/BSD    https://github.com/pyca/cryptography
+  rich                 MIT               https://github.com/Textualize/rich
+  typer                MIT               https://github.com/fastapi/typer
+  PyJWT                MIT               https://github.com/jpadilla/pyjwt
+  tree-sitter          MIT               https://github.com/tree-sitter/py-tree-sitter
+  tree-sitter-python   MIT               https://github.com/tree-sitter/tree-sitter-python
+  tree-sitter-javascript MIT             https://github.com/tree-sitter/tree-sitter-javascript
+  tree-sitter-typescript MIT             https://github.com/tree-sitter/tree-sitter-typescript
+  tree-sitter-go       MIT               https://github.com/tree-sitter/tree-sitter-go
+  tree-sitter-java     MIT               https://github.com/tree-sitter/tree-sitter-java
+  yara-python          BSD-3-Clause      https://github.com/VirusTotal/yara-python
+  psutil               BSD-3-Clause      https://github.com/giampaolo/psutil
+
+─────────────────────────────────────────────────────────────────────────
+2. EXTERNAL CLI TOOLS (invoked via subprocess — NOT bundled)
+─────────────────────────────────────────────────────────────────────────
+
+  REACHABLE invokes the following tools when they are installed on the
+  host system. They are NOT distributed with REACHABLE.
+
+  Tool            License           URL
+  ──────────────  ────────────────  ──────────────────────────────────────
+  Semgrep         LGPL-2.1          https://github.com/semgrep/semgrep
+  Gitleaks        MIT               https://github.com/gitleaks/gitleaks
+  GuardDog        MIT               https://github.com/DataDog/guarddog
+  Grype           Apache-2.0        https://github.com/anchore/grype
+  Syft            Apache-2.0        https://github.com/anchore/syft
+  Git             GPL-2.0           https://git-scm.com
+  Colima          Apache-2.0        https://github.com/abiosoft/colima
+                                    (macOS sandbox — optional)
+  Firecracker     Apache-2.0        https://github.com/firecracker-microvm/firecracker
+                                    (Linux detonation host — optional)
+
+─────────────────────────────────────────────────────────────────────────
+3. DASHBOARD UI ASSETS
+─────────────────────────────────────────────────────────────────────────
+
+  Library         Version   License    URL
+  ──────────────  ────────  ─────────  ──────────────────────────────────
+  Chart.js        4.4.1     MIT        https://www.chartjs.org
+
+─────────────────────────────────────────────────────────────────────────
+4. DATA SOURCES (queried at scan time)
+─────────────────────────────────────────────────────────────────────────
+
+  Source                 Use                          Terms
+  ─────────────────────  ───────────────────────────  ──────────────────
+  NVD / NIST             CVE severity & CVSS          Public domain (US Gov)
+  GitHub Advisory DB     GHSA advisories & CVSS       CC-BY-4.0
+  CISA KEV Catalog       Known Exploited Vulns        Public domain (US Gov)
+  FIRST.org EPSS         Exploit Prediction Scores    CC-BY-SA-4.0
+  OSV.dev                Ecosystem advisories         Apache-2.0
+  PyPI JSON API          Package metadata             PSF terms
+
+─────────────────────────────────────────────────────────────────────────
+5. SEMGREP RULE DERIVATIONS
+─────────────────────────────────────────────────────────────────────────
+
+  Some REACHABLE detection rules were derived from or inspired by:
+
+  Source                   License          URL
+  ───────────────────────  ───────────────  ─────────────────────────────
+  Semgrep Registry         LGPL-2.1         https://semgrep.dev/r
+  Garak (AI red-team)      Apache-2.0       https://github.com/NVIDIA/garak
+  OWASP LLM Top 10         CC-BY-SA-4.0     https://owasp.org/www-project-top-10-for-large-language-model-applications/
+  OWASP Agentic Top 10     CC-BY-SA-4.0     https://owasp.org/www-project-agentic-ai-threats/
+
+  Custom REACHABLE rules written independently are proprietary to
+  Sthenos Security.
+
+─────────────────────────────────────────────────────────────────────────
+
+For questions about licensing, contact: legal@sthenosec.com
