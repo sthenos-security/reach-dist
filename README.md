@@ -1,370 +1,156 @@
 # REACHABLE by Sthenos Security
 
-Powered by AI agents, REACHABLE performs deep code reachability analysis, automated triage, and remediation assistance. As AI-driven threats grow more sophisticated, defenders need equally advanced tools. Know exactly which vulnerabilities are exploitable — and which ones are noise.
+AI-powered application security scanner. REACHABLE combines static analysis, call-graph reachability, and AI agents to tell you which vulnerabilities are actually exploitable — and which ones are noise. One command, full interactive dashboard, 90 seconds.
 
-One command. Seven signal types. AI-verified results. Full interactive dashboard in 90 seconds.
-
----
-
-## What You Get
-
-REACHABLE performs multi-signal reachability analysis across your entire application stack and delivers results through an interactive, offline HTML dashboard.
-
-**Security Analysis**
-- **CVE / SBOM** — Dependency vulnerabilities with reachability analysis. Know which CVEs your code can actually reach.
-- **CWE** — Code-level weaknesses (injection, auth flaws, crypto misuse) with source-level tracing
-- **Secrets** — Hardcoded credentials, API keys, and tokens detected by Gitleaks and Semgrep, with reachability context — is the secret actually used?
-- **Malware** — Static pattern detection + behavioral sandbox analysis. Confirmed vs. suspicious verdicts with package-level attribution.
-- **Config** — Application misconfigurations and insecure defaults detected via Semgrep rules
-
-**AI & LLM Security**
-- **OWASP LLM Top 10** — Prompt injection, data poisoning, model theft, and 7 more categories with Agentic Security Index
-- **AI Attack Surface** — Mapping of AI/ML entry points, model endpoints, and GenAI integration risks across your codebase
-
-**Supply Chain**
-- **Package Health** — Popularity, maintenance activity, and risk signals from npm, PyPI, and GitHub
-- **Dependency Confusion** — Typosquatting and namespace confusion detection
-
-**Data Protection**
-- **DLP / PII** — Taint analysis for data exposure, PII leakage, and privacy risk across source code
-
-**Governance & Visibility**
-- **GRC / Compliance** — Automated mapping to FedRAMP, CMMC 2.0, NIST 800-53, SOC2, and PCI-DSS
-- **Scan Coverage** — Per-signal tool status, file coverage, and language breakdown
-- **Risk & Posture** — Aggregate risk scoring with severity distribution, reachability breakdown, and trend tracking
-
----
-
-## Supported Languages & Frameworks
-
-Full analysis — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM, DLP — works across these languages and frameworks.
-
-| Language | Frameworks with Entrypoint + Dead Code Detection |
-|----------|--------------------------------------------------|
-| **Python** | Flask, FastAPI, Django (FBV, CBV, DRF ViewSets, `@api_view`, `@action`, `router.register()`), Pydantic |
-| **JavaScript / TypeScript** | Express, Fastify (routes, plugins, `fastify.register()`), NestJS (`@Controller`, `@Get`/`@Post`, `@Injectable`, AppModule resolution), React (JSX component mounting), Hono (Cloudflare Workers) |
-| **Go** | Echo (`e.GET`, `e.Group`), net/http, Gin |
-| **Java** | Spring Boot (`@RestController`, `@GetMapping`, `@PostMapping`, `@RequestMapping`) |
-
-Reachability analysis uses static call graphs (tree-sitter, no JVM or external toolchain required) to trace from HTTP entrypoints through the call chain to each finding. Functions not reachable from any entrypoint are marked NOT_REACHABLE — cutting noise by 30–40%.
-
-Additional languages and frameworks are on the [roadmap](#roadmap).
-
----
-
-## Requirements
-
-- Python 3.11, 3.12, 3.13, or 3.14
-- Linux (x86_64 or ARM64) or macOS (Apple Silicon or Intel)
-- Internet access for CVE database updates
-
----
-
-## Install
+## Quick Start
 
 ```bash
+# Install
 curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+
+# Add to PATH (add this line to your ~/.zshrc or ~/.bashrc)
+export PATH="$HOME/.reachable/venv/bin:$PATH"
+
+# Set up tools and credentials
+reachctl doctor
+
+# Scan
+reachctl scan /path/to/your/repo
 ```
 
-### Options
+That's it. The dashboard opens automatically when the scan finishes.
 
-| Option | Description |
-|--------|-------------|
-| `--update`, `-u` | Upgrade existing installation (backs up data) |
-| `--clean` | Remove existing data before install |
-| `--version`, `-v` | Install a specific version (e.g., `1.0.0-rc0`) |
-| `--wheel`, `-w` | Install from a local wheel file |
-| `--list`, `-l` | List available releases |
+**Requirements:** Python 3.11+ and either Linux (x86_64/ARM64) or macOS (Apple Silicon/Intel).
 
-### Upgrade
+---
+
+## What It Finds
+
+REACHABLE runs multiple scanners in one pass and delivers results through an interactive HTML dashboard.
+
+**Vulnerabilities** — CVEs in your dependencies, with call-graph reachability. CWE code weaknesses (injection, auth flaws, crypto misuse) with source-level tracing. Hardcoded secrets and API keys. Application misconfigurations.
+
+**Supply Chain** — Malware detection with behavioral sandbox analysis. Package health scoring. Typosquatting and dependency confusion detection.
+
+**AI/LLM Security** — OWASP LLM Top 10 coverage. AI attack surface mapping across your codebase.
+
+**Data Protection** — PII leakage and data exposure via taint analysis.
+
+**Compliance** — Automated mapping to FedRAMP, CMMC 2.0, NIST 800-53, SOC2, and PCI-DSS.
+
+---
+
+## How Reachability Works
+
+Most scanners tell you a vulnerability exists. REACHABLE tells you if it matters.
+
+Static call graphs (built with tree-sitter — no JVM or external toolchain required) trace from HTTP entrypoints through your call chain to each finding. Functions not reachable from any entrypoint are marked NOT_REACHABLE, cutting noise by 30-40%.
+
+Supported languages and frameworks for entrypoint detection and dead code analysis:
+
+| Language | Frameworks |
+|----------|-----------|
+| **Python** | Flask, FastAPI, Django (FBV, CBV, DRF ViewSets), Pydantic |
+| **JavaScript / TypeScript** | Express, Fastify, NestJS, React, Hono |
+| **Go** | Echo, net/http, Gin |
+| **Java** | Spring Boot |
+
+All languages get CVE, secrets, malware, supply chain, and AI/LLM analysis regardless of call-graph support.
+
+---
+
+## AI-Powered Analysis
+
+Call graphs tell you *if* a function is reachable. AI tells you *if it's exploitable*.
+
+REACHABLE's AI engine (Enzo) reads the actual code surrounding each finding — the variables, the control flow, the data sources — and determines whether the vulnerability is a real threat or a false positive. A SQL injection in a function called from an HTTP route is reachable, but if the variable is a hardcoded constant, it's noise. AI makes this distinction automatically.
+
+Three layers of AI analysis, each building on the last:
+
+**AI Taint Verification** — For every REACHABLE finding, AI reads the code and answers: "Is the variable flowing into this vulnerability actually attacker-controlled?" Eliminates false positives that static analysis alone can't catch.
+
+**AI Discovery** (`--deep-ai-analysis`) — A second independent scan pass powered by LLMs. Finds logic flaws, auth bypasses, and business logic issues that pattern-matching scanners miss entirely. Results tagged with a purple `Deep` badge in the dashboard.
+
+**AI Remediation** (`reachctl fix`) — Generates, validates, and commits security patches. Each fix is tested in an isolated git worktree before touching your code. Currently in beta for Team and Enterprise accounts.
+
+### Set up an AI provider
+
+Set one API key and AI runs automatically on every scan:
+
+```bash
+reachctl doctor set openrouter-api-key    # recommended — openrouter.ai/keys
+```
+
+**Why OpenRouter?** One key, 300+ models, ~$0.001 per finding. REACHABLE routes each task to the best model automatically.
+
+**Other providers:** `anthropic-api-key` (Claude — highest accuracy, ~$0.003/finding), `groq-api-key` (Groq — fastest, ~$0.0004/finding), `openai-api-key` (GPT-4o — ~$0.002/finding). For fully local / air-gapped setups, REACHABLE connects to Ollama or any OpenAI-compatible endpoint — run `reachctl primer` for setup instructions.
+
+Without a key configured, REACHABLE still runs all scanners and call graphs — you get full detection and reachability, just without the AI verification layer. No code leaves your machine unless an AI key is set.
+
+> **Data disclosure:** AI sends code snippets surrounding each finding (typically 10-30 lines) and finding metadata to the configured provider. Full source files are never sent. Use `--no-ai` for fully local scans even with a key configured.
+
+---
+
+## REACHABLE Cloud (Coming Soon)
+
+REACHABLE Cloud is a hosted SaaS platform with team management, multi-repo dashboards, trend analytics, and policy enforcement. Currently in private beta — contact **info@sthenosec.com** for early access.
+
+Plans: **Free** (single user, public repos), **Team**, and **Enterprise**.
+
+---
+
+## Upgrade
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
 ```
 
-> **Upgrade Notice:** Use `--clean` when upgrading from a beta release to avoid database compatibility issues.
+Use `--clean` when upgrading from a beta release to avoid database compatibility issues. Other installer options: `--version <ver>` to pin a specific version, `--wheel <path>` for local installs, `--list` to see available releases.
 
 ---
 
-## Getting Started
+## CI/CD
 
-### 1. Add to PATH
+Fork one of these repos and your pipeline runs REACHABLE automatically:
 
-```bash
-export PATH="$HOME/.reachable/venv/bin:$PATH"
-```
+| Platform | Repo |
+|---|---|
+| GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) |
+| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/sthenos-security) |
+| Jenkins | [`jenkins/Jenkinsfile`](jenkins/Jenkinsfile) in this repo |
 
-Add to your `~/.zshrc` or `~/.bashrc` to make it permanent.
+AI runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` is set as a repo secret.
 
-### 2. First Run — reachctl doctor
-
-`doctor` is the single entry point for everything: tool installation, credential setup, AI provider configuration, and system health checks.
-
-```bash
-reachctl doctor
-```
-
-On first run, doctor installs missing tools automatically (syft, grype, semgrep, guarddog, gitleaks) and walks you through credential setup. In CI/CD, use `reachctl doctor --ci` to read from environment variables without prompts.
-
-Verify after doctor completes:
-
-```bash
-reachctl selftest
-```
-
-### 3. Set Up an AI Provider (Recommended)
-
-Set one API key and every scan gets AI-verified results automatically:
-
-```bash
-# Recommended — single key, 300+ models, per-task routing
-reachctl doctor set openrouter-api-key    # openrouter.ai/keys
-
-# Or a specific provider:
-reachctl doctor set anthropic-api-key     # Claude (highest accuracy)
-reachctl doctor set groq-api-key          # Groq (fast, low cost)
-reachctl doctor set openai-api-key        # OpenAI GPT-4o
-```
-
-The startup banner confirms which provider is active. Use `reachctl doctor status` to see all configured credentials.
-
-### 4. Scan
-
-```bash
-reachctl scan /path/to/your/repo
-```
-
-Dashboard opens automatically.
-
-### Scan Options
-
-| Flag | Effect |
-|------|--------|
-| `--verbose` | Detailed output with per-scanner progress |
-| `--no-dlp` | Skip DLP/PII analysis |
-| `--ci --fail-on high` | CI mode with threshold gating |
-| `--no-ai` | Skip AI taint oracle even if a key is set |
-| `--deep-ai-analysis` | AI source discovery pass (finds issues pattern scanners miss) |
-| `--ai-overrides PATH` | Human-controlled scope overrides (include/exclude patterns) |
-
-### AI Providers
-
-| Provider | RPM | TPM | $/finding (approx) |
-|----------|-----|-----|-------------------|
-| **OpenRouter** (recommended) | 200 | 200K | ~$0.001 |
-| **Claude** | 50–1,000 | 40K–450K | ~$0.003 |
-| **Groq** | 120 | 100K | ~$0.0004 |
-| **OpenAI** | 120+ | 200K+ | ~$0.002 |
-| **Local (Ollama)** | ∞ | ∞ | free |
-
-> **AI Data Disclosure:** When AI runs with a cloud provider, REACHABLE sends code snippets surrounding each finding (typically 10–30 lines) and finding metadata. Full source files are never sent. Without a configured key, no source code leaves your machine. Use `--no-ai` for fully local scans.
-
-### Reference
-
-```bash
-reachctl primer       # Full interactive command reference
-reachctl --help       # Quick overview
-```
+For CI mode with threshold gating: `reachctl scan /path --ci --fail-on high`
 
 ---
 
-## CI/CD Integration
+## Going Further
 
-Ready-to-use CI/CD configurations — fork the testbed repo for your platform:
-
-| Platform | Repo | What you get |
-|---|---|---|
-| GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) | Fork, push, scan runs automatically |
-| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/sthenos-security) | Fork, push, scan runs automatically |
-
-Both repos contain a working REACHABLE scan pipeline with install, scan, dashboard artifact upload, and SARIF reporting. AI reachability runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` is set as a repo secret.
-
-For Jenkins, see the [`jenkins/Jenkinsfile`](jenkins/Jenkinsfile) in this repo — drop it into your repo root and create a Pipeline job.
-
----
-
-## Supply Chain Detonation (Linux)
-
-Every pip and npm package is installed in an isolated sandbox before it reaches your environment. On macOS, this runs locally via Colima/Docker (`reachctl sandbox --init`). On Linux CI/CD runners, we provide a dedicated Firecracker detonation host — KVM-isolated microVMs with hardware-level separation.
-
-### Quick Start
+For everything beyond the basics — AI remediation (`reachctl fix`), supply chain detonation sandboxes, air-gapped / local AI with Ollama, CI/CD integration, scan options, and more — run:
 
 ```bash
-# 1. On the detonation host (bare-metal or nested-virt VM):
-curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/detonation/setup-detonation-host.sh | sudo bash
-
-# 2. On your CI runner / dev machine:
-reachctl sandbox --remote <detonation-host-ip>
-
-# 3. Scan with remote detonation:
-reachctl scan /path/to/repo --sandbox-mode remote
+reachctl primer
 ```
 
-### What's Included
-
-| File | Description |
-|------|-------------|
-| [`detonation/setup-detonation-host.sh`](detonation/setup-detonation-host.sh) | One-command Firecracker host setup (installs Firecracker, creates restricted SSH user, generates keypair, builds rootfs) |
-| [`detonation/RUNBOOK.md`](detonation/RUNBOOK.md) | Full operational runbook: architecture, prerequisites, CI/CD config, troubleshooting, security model, teardown |
-
-For CI/CD workflows with remote detonation enabled, see the testbed repos:
-- [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) — GitHub Actions with `--sandbox-mode remote`
-- [reach-testbed-gitlab](https://gitlab.com/sthenos-security/sthenos-security) — GitLab CI with `--sandbox-mode remote`
-
-### How It Works
-
-1. **Batch install** — all packages in one Firecracker microVM (~60s)
-2. **If clean** — done (zero overhead for safe projects)
-3. **If something fires** — binary search (bisect) isolates the malicious package in ~log₂(N) runs
-4. **Detection signals**: credential theft (honeypot files), network exfiltration (blocked), `.pth` auto-execution, persistence (crontab/bashrc/systemd), obfuscated payloads (base64/exec/eval)
-
-### Security Model
-
-SSH transport with `ForceCommand` — the `detonation` user has no shell access; only the detonation handler binary runs. Host key pinning (`StrictHostKeyChecking=yes`) and machine-id verification detect host replacement or MITM. Firecracker uses KVM hardware virtualization — a 3+ exploit chain is required to escape the VM.
-
-See the full [Runbook](detonation/RUNBOOK.md) for details.
+Primer is a full interactive command reference built into the CLI. It covers every feature, flag, and configuration option with examples.
 
 ---
 
 ## Release Verification
 
-Every release is signed and checksummed. The installer verifies both automatically.
-
-**SHA-256** — verified on every install. Mismatch aborts immediately.
-
-**Cosign** — verified if `cosign` is installed. Keyless OIDC signatures via [Sigstore](https://sigstore.dev), tied to the GitHub Actions workflow that built the wheel.
-
-Checksums and signature bundles are attached to each [GitHub Release](https://github.com/sthenos-security/reach-dist/releases).
-
-List available releases: `./install.sh --list`
-
----
-
-## Enzo AI Engine
-
-Enzo adds AI-powered capabilities on top of the core scan. Both passes are optional — the scan is complete without them.
-
-### 1. AI Reachability Analysis
-
-AI goes one level deeper and determines whether the *variable* flowing into the vulnerable function is actually exploitable.
-
-A SQL injection in a function called from an HTTP route is reachable — but if the variable is a hardcoded constant, it's a false positive. AI reads your code and makes this distinction for CWE, secrets, DLP, and AI/LLM findings.
-
-```bash
-# Set a key — AI runs automatically on the next scan
-reachctl doctor set openrouter-api-key    # recommended
-reachctl doctor set anthropic-api-key     # Claude (highest accuracy)
-reachctl doctor set groq-api-key          # Groq (fast, cheap)
-
-reachctl scan ~/src/myapp                 # AI runs automatically
-reachctl scan ~/src/myapp --deep-ai-analysis  # + AI source discovery pass
-reachctl scan ~/src/myapp --no-ai         # skip AI even though key is set
-
-# Standalone analysis after a scan:
-reachctl analyze ~/src/myapp --provider openrouter
-reachctl analyze ~/src/myapp --mode local  # fully private, Ollama
-```
-
-Results appear in the scan log and as verification badges in the dashboard.
-
-### 2. AI Remediation (Beta — Cloud Team/Enterprise)
-
-> **Beta Feature:** AI remediation is available to Cloud Team and Enterprise accounts. Contact info@sthenosec.com for access.
-
-Automatically generates, validates, and commits security patches. Each fix is tested in an isolated git worktree before touching your code:
-
-1. Patch applies cleanly (syntax + build)
-2. Exploit test verifies the vulnerability is resolved
-3. Rescan confirms the finding is gone
-4. Commit only if all checks pass
-
-```bash
-reachctl fix --list                       # show fixable findings
-reachctl fix --all --dry-run              # preview patches without applying
-reachctl fix --all                        # fix all findings
-reachctl fix --id 07d2d96a               # fix one specific finding
-```
-
-Supports code patches (CWE), dependency upgrades (CVE), config changes, and secret rotation.
-
-### 3. Bring Your Own Model (Enterprise / Air-Gapped)
-
-For organizations that must keep code on-premises, REACHABLE connects to any Ollama or OpenAI-compatible model endpoint.
-
-```bash
-# Local machine
-reachctl enzo setup                       # pull best model for your hardware
-
-# Custom endpoint (shared GPU server, Kubernetes)
-export OLLAMA_HOST=http://gpu-box.internal:11434
-reachctl fix --all --mode local
-```
-
-Or configure per-repo in `.reachable.yml`:
-
-```yaml
-enzo:
-  mode: local
-  local_endpoint: http://gpu-box.internal:11434
-  local_model: qwen2.5-coder:32b
-```
+Every release is signed with [Sigstore](https://sigstore.dev) cosign and checksummed with SHA-256. The installer verifies both automatically.
 
 ---
 
 ## Roadmap
 
-Active development. Here's where we're headed:
-
-- **AI Discovery (Beta)** — LLM-powered vulnerability discovery runs alongside traditional scanners as a second independent pass. Finds logic flaws, auth bypasses, and business logic issues that pattern-matching tools miss. Results tagged with purple `Deep` badge in the dashboard.
-- **Zero False Positive Pipeline** — Completing the canonical AppSec workflow: AI discovery → static FP elimination → AI reachability verification → dynamic sandbox confirmation → idiomatic patch generation → test validation → PR. Each stage further filters noise so developers only see confirmed, ready-to-merge fixes.
-- **AI-Powered Remediation GA** — `reachctl fix` generates, validates, and commits security patches. Currently in beta for Cloud Team and Enterprise accounts. Targeting GA in the next release.
-- **REACHABLE Cloud (SaaS)** — Hosted dashboard with team management, multi-repo views, trend analytics, and policy enforcement. Currently in private beta — contact info@sthenosec.com for early access.
-- **RADR Runtime Agent** — Lightweight eBPF agent that correlates runtime behavior with static scan findings. Eliminates the last category of unknown reachability.
-- **Additional Languages** — Expanding reachability analysis to Ruby, Rust, C/C++, and additional frameworks.
-- **CNAPP Integration** — Pre-computed reachability metadata as a build artifact consumed by Wiz, Orca, Prisma, and other CNAPP platforms to enrich runtime attack paths with code-level context.
+REACHABLE is under active development. Coming next: AI-powered remediation GA, REACHABLE Cloud (SaaS) with team management and trend analytics, a runtime eBPF agent (RADR), expanded language support (Ruby, Rust, C/C++), and CNAPP integration for Wiz, Orca, and Prisma.
 
 ---
 
-## Note
+False positive? Email **fp@sthenosec.com**. General support: **info@sthenosec.com**.
 
-If `reachctl` is not found after install, add it to your PATH:
-
-```bash
-export PATH="$HOME/.reachable/venv/bin:$PATH"
-```
-
-Add to `~/.zshrc` or `~/.bashrc` to make it permanent.
-
----
-
-## Data Quality & False Positive Reporting
-
-No security scanner achieves 100% precision — not ours, not anyone's. We take data quality seriously: every release is benchmarked against real-world codebases, and our multi-stage FP elimination pipeline (static rules, AI taint verification, call-graph reachability) is designed to keep noise as low as possible.
-
-If you encounter a finding you believe is a false positive, we want to hear about it. Please email **fp@sthenosec.com** with:
-
-- The finding type (CVE, CWE, secret, malware, etc.)
-- A minimal code snippet that triggers the finding
-- Why you believe it's a false positive
-
-Every report is reviewed and, where confirmed, fed back into our suppression rules and AI training data. Your feedback directly improves the scanner for everyone.
-
----
-
-## Third-Party Software
-
-REACHABLE uses open-source tools and libraries. See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for the full list of dependencies, external tools, data sources, and their licenses.
-
----
-
-## Support
-
-Email: info@sthenosec.com
-
----
+See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for dependencies and licenses.
 
 © 2026 Sthenos Security. All rights reserved.
-
----
-
-> ⚠️ Results are risk-informed guidance based on available data sources and metadata; not a guarantee of security or compliance. Sthenos Security assumes no liability for actions taken based on these findings and does not share or expose your proprietary source code.
