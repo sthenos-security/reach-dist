@@ -15,7 +15,7 @@ REACHABLE performs multi-signal reachability analysis across your entire applica
 - **CWE** — Code-level weaknesses (injection, auth flaws, crypto misuse) with source-level tracing
 - **Secrets** — Hardcoded credentials, API keys, and tokens detected by Gitleaks and Semgrep, with reachability context — is the secret actually used?
 - **Malware** — Static pattern detection + behavioral sandbox analysis. Confirmed vs. suspicious verdicts with package-level attribution.
-- **IaC / Config** — Kubernetes, Docker, and infrastructure misconfigurations mapped to compliance frameworks
+- **Config** — Application misconfigurations and insecure defaults detected via Semgrep rules
 
 **AI & LLM Security**
 - **OWASP LLM Top 10** — Prompt injection, data poisoning, model theft, and 7 more categories with Agentic Security Index
@@ -42,7 +42,7 @@ Full analysis — CVE reachability, CWE, secrets, malware, supply chain, AI/LLM,
 | Language | Frameworks with Entrypoint + Dead Code Detection |
 |----------|--------------------------------------------------|
 | **Python** | Flask, FastAPI, Django (FBV, CBV, DRF ViewSets, `@api_view`, `@action`, `router.register()`), Pydantic |
-| **JavaScript / TypeScript** | Express, Fastify (routes, plugins, `fastify.register()`), NestJS (`@Controller`, `@Get`/`@Post`, `@Injectable`, AppModule resolution), React (JSX component mounting) |
+| **JavaScript / TypeScript** | Express, Fastify (routes, plugins, `fastify.register()`), NestJS (`@Controller`, `@Get`/`@Post`, `@Injectable`, AppModule resolution), React (JSX component mounting), Hono (Cloudflare Workers) |
 | **Go** | Echo (`e.GET`, `e.Group`), net/http, Gin |
 | **Java** | Spring Boot (`@RestController`, `@GetMapping`, `@PostMapping`, `@RequestMapping`) |
 
@@ -145,6 +145,7 @@ Dashboard opens automatically.
 | `--ci --fail-on high` | CI mode with threshold gating |
 | `--no-ai` | Skip AI taint oracle even if a key is set |
 | `--deep-ai-analysis` | AI source discovery pass (finds issues pattern scanners miss) |
+| `--ai-overrides PATH` | Human-controlled scope overrides (include/exclude patterns) |
 
 ### AI Providers
 
@@ -333,6 +334,20 @@ export PATH="$HOME/.reachable/venv/bin:$PATH"
 ```
 
 Add to `~/.zshrc` or `~/.bashrc` to make it permanent.
+
+---
+
+## Data Quality & False Positive Reporting
+
+No security scanner achieves 100% precision — not ours, not anyone's. We take data quality seriously: every release is benchmarked against real-world codebases, and our multi-stage FP elimination pipeline (static rules, AI taint verification, call-graph reachability) is designed to keep noise as low as possible.
+
+If you encounter a finding you believe is a false positive, we want to hear about it. Please email **fp@sthenosec.com** with:
+
+- The finding type (CVE, CWE, secret, malware, etc.)
+- A minimal code snippet that triggers the finding
+- Why you believe it's a false positive
+
+Every report is reviewed and, where confirmed, fed back into our suppression rules and AI training data. Your feedback directly improves the scanner for everyone.
 
 ---
 
