@@ -417,12 +417,32 @@ download_and_install() {
         # Install vendor wheels first if present (pre-compiled C extensions)
         # Direct install avoids pip ignoring them due to platform tag mismatches
         WHEEL_DIR=$(dirname "$LOCAL_WHEEL")
+        HAS_VENDOR=false
         if [[ -d "$WHEEL_DIR/vendor" ]] && ls "$WHEEL_DIR/vendor"/*.whl 1>/dev/null 2>&1; then
             print_ok "Installing vendor wheels from $WHEEL_DIR/vendor/"
             "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl -q
+            HAS_VENDOR=true
         fi
 
-        "$HOME/.reachable/venv/bin/pip" install "$LOCAL_WHEEL" -q
+        set +e
+        PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install "$LOCAL_WHEEL" -q 2>&1)
+        PIP_RC=$?
+        set -e
+        if [[ $PIP_RC -ne 0 ]]; then
+            if echo "$PIP_OUTPUT" | grep -qi "gcc\|building wheel\|Failed building"; then
+                print_error "Installation failed — a C extension needs compilation but gcc is not installed"
+                if [[ "$HAS_VENDOR" == true ]]; then
+                    print_error "Vendor wheels were installed but versions may not match. This is a packaging bug."
+                    print_error "Report to: info@sthenosec.com"
+                else
+                    print_info "Try placing vendor/*.whl next to the wheel file, or install gcc:"
+                    print_info "  sudo apt-get install gcc python3-dev"
+                fi
+            else
+                echo "$PIP_OUTPUT" | tail -20
+            fi
+            exit 1
+        fi
         print_ok "Installation complete"
         if [[ -n "${GITHUB_PATH:-}" ]]; then
             echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
@@ -623,8 +643,13 @@ download_and_install() {
     PIP_RC=$?
     set -e
     if [[ $PIP_RC -ne 0 ]]; then
-        echo "$PIP_OUTPUT" | tail -30
-        print_error "pip install failed (exit $PIP_RC) — see output above"
+        if echo "$PIP_OUTPUT" | grep -qi "gcc\|building wheel\|Failed building"; then
+            print_error "Installation failed — a C extension needs compilation but gcc is not installed"
+            print_error "This is a packaging bug. Report to: info@sthenosec.com"
+        else
+            echo "$PIP_OUTPUT" | tail -30
+        fi
+        print_error "pip install failed (exit $PIP_RC)"
         exit 1
     fi
     print_ok "Installation complete"
