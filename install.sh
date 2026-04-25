@@ -564,18 +564,53 @@ download_and_install() {
         print_warn "No constraints.txt found — dependencies resolved from PyPI (unpinned)"
     fi
 
-    # Download pre-compiled vendor wheels (C extensions that may need gcc)
-    # These are only published for Linux — macOS has Xcode command line tools.
+    # Download pre-compiled vendor wheels (C extensions: psutil, ruamel.yaml.clib)
+    # Built and signed in CI — no PyPI contact, no compiler needed on customer machine.
+    # Only published for Linux — macOS ships with Xcode command line tools.
     FIND_LINKS_FLAG=""
     if [[ "$OS" == "linux" ]]; then
         VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
         VENDOR_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_ARCHIVE}"
         if curl -fsSL -L "$VENDOR_URL" -o "$VENDOR_ARCHIVE" 2>/dev/null; then
+            # Verify vendor archive checksum (included in checksums.sha256 since CI signs it)
+            if [[ -f checksums.sha256 ]] && grep -q "$VENDOR_ARCHIVE" checksums.sha256; then
+                EXPECTED_VENDOR=$(grep "$VENDOR_ARCHIVE" checksums.sha256 | awk '{print $1}')
+                if command -v sha256sum &>/dev/null; then
+                    ACTUAL_VENDOR=$(sha256sum "$VENDOR_ARCHIVE" | awk '{print $1}')
+                else
+                    ACTUAL_VENDOR=$(shasum -a 256 "$VENDOR_ARCHIVE" | awk '{print $1}')
+                fi
+                if [[ "$EXPECTED_VENDOR" == "$ACTUAL_VENDOR" ]]; then
+                    print_ok "Vendor archive checksum verified"
+                else
+                    print_error "Vendor archive checksum FAILED — aborting"
+                    exit 1
+                fi
+            fi
+
+            # Verify vendor archive cosign signature (if cosign available)
+            if command -v cosign &>/dev/null; then
+                VENDOR_BUNDLE="${VENDOR_ARCHIVE}.cosign.bundle"
+                VENDOR_BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_BUNDLE}"
+                if curl -fsSL -L "$VENDOR_BUNDLE_URL" -o "$VENDOR_BUNDLE" 2>/dev/null; then
+                    if cosign verify-blob \
+                        --bundle "$VENDOR_BUNDLE" \
+                        --certificate-identity-regexp "https://github.com/sthenos-security/" \
+                        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+                        "$VENDOR_ARCHIVE" &>/dev/null; then
+                        print_ok "Vendor archive signature verified (Sigstore)"
+                    else
+                        print_error "Vendor archive signature FAILED — aborting"
+                        exit 1
+                    fi
+                fi
+            fi
+
             mkdir -p vendor/
             tar xzf "$VENDOR_ARCHIVE" -C vendor/
             if ls vendor/*.whl 1>/dev/null 2>&1; then
                 FIND_LINKS_FLAG="--find-links vendor/"
-                print_ok "Vendor wheels downloaded (no compiler needed)"
+                print_ok "Vendor wheels ready (built and signed in CI)"
             fi
         else
             print_info "No vendor wheels for this platform — dependencies from PyPI"
