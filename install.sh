@@ -413,7 +413,16 @@ download_and_install() {
         print_step "Installing REACHABLE"
         python3 -m venv "$HOME/.reachable/venv"
         "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
-        "$HOME/.reachable/venv/bin/pip" install "$LOCAL_WHEEL" -q
+
+        # Use vendor wheels if a vendor/ dir exists next to the wheel
+        LOCAL_FIND_LINKS=""
+        WHEEL_DIR=$(dirname "$LOCAL_WHEEL")
+        if [[ -d "$WHEEL_DIR/vendor" ]] && ls "$WHEEL_DIR/vendor"/*.whl 1>/dev/null 2>&1; then
+            LOCAL_FIND_LINKS="--find-links $WHEEL_DIR/vendor"
+            print_ok "Using vendor wheels from $WHEEL_DIR/vendor/"
+        fi
+
+        "$HOME/.reachable/venv/bin/pip" install $LOCAL_FIND_LINKS "$LOCAL_WHEEL" -q
         print_ok "Installation complete"
         if [[ -n "${GITHUB_PATH:-}" ]]; then
             echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
@@ -555,8 +564,26 @@ download_and_install() {
         print_warn "No constraints.txt found — dependencies resolved from PyPI (unpinned)"
     fi
 
+    # Download pre-compiled vendor wheels (C extensions that may need gcc)
+    # These are only published for Linux — macOS has Xcode command line tools.
+    FIND_LINKS_FLAG=""
+    if [[ "$OS" == "linux" ]]; then
+        VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
+        VENDOR_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_ARCHIVE}"
+        if curl -fsSL -L "$VENDOR_URL" -o "$VENDOR_ARCHIVE" 2>/dev/null; then
+            mkdir -p vendor/
+            tar xzf "$VENDOR_ARCHIVE" -C vendor/
+            if ls vendor/*.whl 1>/dev/null 2>&1; then
+                FIND_LINKS_FLAG="--find-links vendor/"
+                print_ok "Vendor wheels downloaded (no compiler needed)"
+            fi
+        else
+            print_info "No vendor wheels for this platform — dependencies from PyPI"
+        fi
+    fi
+
     set +e
-    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install $CONSTRAINTS_FLAG "$WHEEL_FILE" 2>&1)
+    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install $CONSTRAINTS_FLAG $FIND_LINKS_FLAG "$WHEEL_FILE" 2>&1)
     PIP_RC=$?
     set -e
     if [[ $PIP_RC -ne 0 ]]; then
