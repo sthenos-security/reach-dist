@@ -414,15 +414,15 @@ download_and_install() {
         python3 -m venv "$HOME/.reachable/venv"
         "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
 
-        # Use vendor wheels if a vendor/ dir exists next to the wheel
-        LOCAL_FIND_LINKS=""
+        # Install vendor wheels first if present (pre-compiled C extensions)
+        # Direct install avoids pip ignoring them due to platform tag mismatches
         WHEEL_DIR=$(dirname "$LOCAL_WHEEL")
         if [[ -d "$WHEEL_DIR/vendor" ]] && ls "$WHEEL_DIR/vendor"/*.whl 1>/dev/null 2>&1; then
-            LOCAL_FIND_LINKS="--find-links $WHEEL_DIR/vendor"
-            print_ok "Using vendor wheels from $WHEEL_DIR/vendor/"
+            print_ok "Installing vendor wheels from $WHEEL_DIR/vendor/"
+            "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl -q
         fi
 
-        "$HOME/.reachable/venv/bin/pip" install $LOCAL_FIND_LINKS "$LOCAL_WHEEL" -q
+        "$HOME/.reachable/venv/bin/pip" install "$LOCAL_WHEEL" -q
         print_ok "Installation complete"
         if [[ -n "${GITHUB_PATH:-}" ]]; then
             echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
@@ -609,8 +609,9 @@ download_and_install() {
             mkdir -p vendor/
             tar xzf "$VENDOR_ARCHIVE" -C vendor/
             if ls vendor/*.whl 1>/dev/null 2>&1; then
-                FIND_LINKS_FLAG="--find-links vendor/"
-                print_ok "Vendor wheels ready (built and signed in CI)"
+                # Install vendor wheels directly first (avoids platform tag issues)
+                "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall vendor/*.whl -q
+                print_ok "Vendor wheels installed (built and signed in CI)"
             fi
         else
             print_info "No vendor wheels for this platform — dependencies from PyPI"
@@ -618,7 +619,7 @@ download_and_install() {
     fi
 
     set +e
-    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install $CONSTRAINTS_FLAG $FIND_LINKS_FLAG "$WHEEL_FILE" 2>&1)
+    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install $CONSTRAINTS_FLAG "$WHEEL_FILE" 2>&1)
     PIP_RC=$?
     set -e
     if [[ $PIP_RC -ne 0 ]]; then
