@@ -197,16 +197,21 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Apply custom version or resolve latest
-if [[ -n "$CUSTOM_VERSION" ]]; then
+# --wheel mode doesn't need a version (extracted from wheel filename)
+if [[ -n "$LOCAL_WHEEL" ]]; then
+    VERSION="local"
+    WHEEL_VERSION="local"
+elif [[ -n "$CUSTOM_VERSION" ]]; then
     VERSION="$CUSTOM_VERSION"
+    WHEEL_VERSION="$VERSION"
 else
     VERSION=$(resolve_version)
     if [[ -z "$VERSION" ]]; then
         echo "Error: could not resolve latest version from ${REPO}"
         exit 1
     fi
+    WHEEL_VERSION="$VERSION"
 fi
-WHEEL_VERSION="$VERSION"
 
 # -----------------------------------------------------------------------------
 # Colors & Formatting
@@ -227,6 +232,54 @@ fi
 # -----------------------------------------------------------------------------
 # Helper Functions
 # -----------------------------------------------------------------------------
+
+# Retag vendor wheels from native linux_* platform tags to manylinux_2_17_*
+# so pip's --find-links resolver recognises them.  CI builds produce wheels
+# with bare linux_aarch64 / linux_x86_64 tags because they're built on the
+# target platform without auditwheel.  pip's resolver only matches manylinux_*
+# tags when selecting wheels from a --find-links directory.
+_retag_vendor_wheels() {
+    local vendor_dir="$1"
+    for whl in "$vendor_dir"/*.whl; do
+        local base
+        base=$(basename "$whl")
+        local new="$base"
+        new=$(echo "$new" | sed 's/linux_aarch64/manylinux_2_17_aarch64.manylinux2014_aarch64/g')
+        new=$(echo "$new" | sed 's/linux_x86_64/manylinux_2_17_x86_64.manylinux2014_x86_64/g')
+        if [ "$base" != "$new" ]; then
+            mv "$vendor_dir/$base" "$vendor_dir/$new"
+        fi
+    done
+}
+
+# Emit --only-binary flags for every package found in the vendor directory.
+# This tells pip "never build these from source" — if the vendor wheel isn't
+# compatible, pip fails fast instead of trying to compile C code without gcc.
+# Outputs nothing if the vendor dir is empty or missing.
+_vendor_only_binary_flags() {
+    local vendor_dir="$1"
+    if [ ! -d "$vendor_dir" ]; then
+        return
+    fi
+    local whl_count
+    whl_count=$(find "$vendor_dir" -maxdepth 1 -name "*.whl" 2>/dev/null | wc -l)
+    if [ "$whl_count" -eq 0 ]; then
+        return
+    fi
+    local flags=""
+    for whl in "$vendor_dir"/*.whl; do
+        # Extract package name from wheel filename (name-version-...)
+        local pkg
+        pkg=$(basename "$whl" | sed 's/-[0-9].*//' | tr '_' '-')
+        # Deduplicate: only add if not already in flags
+        case "$flags" in
+            *"$pkg"*) ;;
+            *) flags="$flags --only-binary $pkg" ;;
+        esac
+    done
+    echo $flags
+}
+
 print_header() {
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -414,32 +467,41 @@ download_and_install() {
         python3 -m venv "$HOME/.reachable/venv"
         "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
 
-        # Install vendor wheels first if present (pre-compiled C extensions)
-        # Direct install avoids pip ignoring them due to platform tag mismatches
+        # Install vendor wheels if present (pre-compiled C extensions).
+        # These are C packages (ruamel.yaml.clib, psutil, yara-python) built in CI
+        # for this exact Python version + platform.
+        #
+        # Strategy: rename vendor wheels from linux_* tags to manylinux_2_17_*
+        # so pip's --find-links resolver recognises them.  Then install the main
+        # wheel with --find-links pointing at the vendor dir.  pip resolves
+        # vendor deps from the local directory and never attempts a source build.
         WHEEL_DIR=$(dirname "$LOCAL_WHEEL")
         HAS_VENDOR=false
+        VENDOR_FIND_LINKS=""
         if [[ -d "$WHEEL_DIR/vendor" ]] && ls "$WHEEL_DIR/vendor"/*.whl 1>/dev/null 2>&1; then
-            print_ok "Installing vendor wheels from $WHEEL_DIR/vendor/"
-            "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl -q
+            print_ok "Preparing vendor wheels from $WHEEL_DIR/vendor/"
+            _retag_vendor_wheels "$WHEEL_DIR/vendor"
+            VENDOR_FIND_LINKS="--find-links $WHEEL_DIR/vendor/"
             HAS_VENDOR=true
         fi
 
+        # Install the main wheel.  --find-links lets pip resolve vendor C
+        # extensions from the local directory; --only-binary for each vendor
+        # package prevents fallback to source builds when no compiler is present.
         set +e
-        PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install "$LOCAL_WHEEL" -q 2>&1)
+        PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install \
+            $VENDOR_FIND_LINKS \
+            $(_vendor_only_binary_flags "$WHEEL_DIR/vendor") \
+            "$LOCAL_WHEEL" 2>&1)
         PIP_RC=$?
         set -e
         if [[ $PIP_RC -ne 0 ]]; then
-            if echo "$PIP_OUTPUT" | grep -qi "gcc\|building wheel\|Failed building"; then
-                print_error "Installation failed — a C extension needs compilation but gcc is not installed"
-                if [[ "$HAS_VENDOR" == true ]]; then
-                    print_error "Vendor wheels were installed but versions may not match. This is a packaging bug."
-                    print_error "Report to: info@sthenosec.com"
-                else
-                    print_info "Try placing vendor/*.whl next to the wheel file, or install gcc:"
-                    print_info "  sudo apt-get install gcc python3-dev"
-                fi
-            else
-                echo "$PIP_OUTPUT" | tail -20
+            print_error "pip install failed (exit $PIP_RC)"
+            echo "$PIP_OUTPUT" | tail -30
+            if [[ "$HAS_VENDOR" == true ]]; then
+                echo ""
+                print_error "Vendor wheels were pre-installed but pip still failed."
+                print_error "Report to: info@sthenosec.com"
             fi
             exit 1
         fi
@@ -587,7 +649,7 @@ download_and_install() {
     # Download pre-compiled vendor wheels (C extensions: psutil, ruamel.yaml.clib)
     # Built and signed in CI — no PyPI contact, no compiler needed on customer machine.
     # Only published for Linux — macOS ships with Xcode command line tools.
-    FIND_LINKS_FLAG=""
+    HAS_VENDOR_REMOTE=false
     if [[ "$OS" == "linux" ]]; then
         VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
         VENDOR_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_ARCHIVE}"
@@ -629,27 +691,37 @@ download_and_install() {
             mkdir -p vendor/
             tar xzf "$VENDOR_ARCHIVE" -C vendor/
             if ls vendor/*.whl 1>/dev/null 2>&1; then
-                # Install vendor wheels directly first (avoids platform tag issues)
-                "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall vendor/*.whl -q
-                print_ok "Vendor wheels installed (built and signed in CI)"
+                _retag_vendor_wheels vendor/
+                HAS_VENDOR_REMOTE=true
+                print_ok "Vendor wheels prepared (built and signed in CI)"
             fi
         else
             print_info "No vendor wheels for this platform — dependencies from PyPI"
         fi
     fi
 
+    # Install the main wheel.  --find-links lets pip resolve vendor C
+    # extensions from the local directory; --only-binary for each vendor
+    # package prevents fallback to source builds when no compiler is present.
+    VENDOR_FIND_LINKS_REMOTE=""
+    if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
+        VENDOR_FIND_LINKS_REMOTE="--find-links vendor/"
+    fi
     set +e
-    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install $CONSTRAINTS_FLAG "$WHEEL_FILE" 2>&1)
+    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install \
+        $VENDOR_FIND_LINKS_REMOTE \
+        $(_vendor_only_binary_flags vendor/) \
+        $CONSTRAINTS_FLAG "$WHEEL_FILE" 2>&1)
     PIP_RC=$?
     set -e
     if [[ $PIP_RC -ne 0 ]]; then
-        if echo "$PIP_OUTPUT" | grep -qi "gcc\|building wheel\|Failed building"; then
-            print_error "Installation failed — a C extension needs compilation but gcc is not installed"
-            print_error "This is a packaging bug. Report to: info@sthenosec.com"
-        else
-            echo "$PIP_OUTPUT" | tail -30
-        fi
         print_error "pip install failed (exit $PIP_RC)"
+        echo "$PIP_OUTPUT" | tail -30
+        if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
+            echo ""
+            print_error "Vendor wheels were pre-installed but pip still failed."
+            print_error "Report to: info@sthenosec.com"
+        fi
         exit 1
     fi
     print_ok "Installation complete"
