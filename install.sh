@@ -506,6 +506,16 @@ download_and_install() {
             exit 1
         fi
         print_ok "Installation complete"
+        # Write venv-initialized stamp for local wheel path
+        if [[ "$HAS_VENDOR" == true ]]; then
+            STAMP="$HOME/.reachable/venv/.vendor-stamp"
+            : > "$STAMP"
+            for whl in "$WHEEL_DIR/vendor"/*.whl; do
+                [[ -f "$whl" ]] || continue
+                pkg=$(basename "$whl" | sed 's/-[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+                echo "$pkg" >> "$STAMP"
+            done
+        fi
         if [[ -n "${GITHUB_PATH:-}" ]]; then
             echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
             echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
@@ -725,6 +735,18 @@ download_and_install() {
         exit 1
     fi
     print_ok "Installation complete"
+
+    # Write venv-initialized stamp — tells doctor not to re-resolve vendor packages.
+    # Contains the list of vendor-installed packages so guarddog backfill skips them.
+    if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
+        STAMP="$HOME/.reachable/venv/.vendor-stamp"
+        : > "$STAMP"
+        for whl in vendor/*.whl; do
+            [[ -f "$whl" ]] || continue
+            pkg=$(basename "$whl" | sed 's/-[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+            echo "$pkg" >> "$STAMP"
+        done
+    fi
 
     # Cleanup
     rm -rf "$DOWNLOAD_DIR"
