@@ -485,9 +485,17 @@ download_and_install() {
             HAS_VENDOR=true
         fi
 
-        # Install the main wheel.  --find-links lets pip resolve vendor C
-        # extensions from the local directory; --only-binary for each vendor
-        # package prevents fallback to source builds when no compiler is present.
+        # ── Pre-install vendor wheels ──────────────────────────────────────
+        # Vendor wheels contain C extensions (yara-python, psutil, ruamel-yaml-clib)
+        # built in CI.  Some are deps of guarddog, not reachable — so --find-links
+        # alone won't install them.  Install ALL vendor wheels explicitly first.
+        if [[ "$HAS_VENDOR" == true ]]; then
+            "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl -q 2>&1 || true
+        fi
+
+        # Install the main wheel.  --find-links lets pip resolve any remaining
+        # dependencies; --only-binary for each vendor package prevents fallback
+        # to source builds when no compiler is present.
         set +e
         PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install \
             $VENDOR_FIND_LINKS \
@@ -710,8 +718,17 @@ download_and_install() {
         fi
     fi
 
-    # Install the main wheel.  --find-links lets pip resolve vendor C
-    # extensions from the local directory; --only-binary for each vendor
+    # ── Pre-install vendor wheels ──────────────────────────────────────────
+    # Vendor wheels contain C extensions (yara-python, psutil, ruamel-yaml-clib)
+    # built in CI.  Some are deps of guarddog, not reachable — so --find-links
+    # alone won't install them (pip only resolves deps of the main package).
+    # Install ALL vendor wheels explicitly first, then install the main wheel.
+    if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
+        "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall vendor/*.whl -q 2>&1 || true
+    fi
+
+    # Install the main wheel.  --find-links lets pip resolve any remaining
+    # dependencies from the vendor directory; --only-binary for each vendor
     # package prevents fallback to source builds when no compiler is present.
     VENDOR_FIND_LINKS_REMOTE=""
     if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
