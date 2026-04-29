@@ -143,6 +143,14 @@ REACHABLE is under active development. Coming next: AI-powered remediation GA, R
 
 ---
 
+## Contributors
+
+Security review and attacker-minded feedback by **[Peter Levashov / SeveraDAO Security](https://severadao.ai/index.html)**.
+
+Thanks to our beta testers for early feedback, bug reports, and real-world scan validation across production codebases.
+
+---
+
 Questions or false positive reports? Email **info@sthenosec.com**.
 
 See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for dependencies and licenses.
