@@ -26,7 +26,7 @@
 #
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -41,7 +41,9 @@ resolve_version() {
     local response
 
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        response=$(curl -sL -H "Authorization: Bearer ${GITHUB_TOKEN}" "$api_url")
+        # F-006a: pass token via --config stdin, not CLI args (CWE-214)
+        response=$(printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN}" \
+            | curl -sL --config - "$api_url")
     else
         response=$(curl -sL "$api_url")
     fi
@@ -81,7 +83,9 @@ list_releases() {
     local response
 
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        response=$(curl -sL -H "Authorization: Bearer ${GITHUB_TOKEN}" "$api_url")
+        # F-006a: pass token via --config stdin, not CLI args (CWE-214)
+        response=$(printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN}" \
+            | curl -sL --config - "$api_url")
     else
         response=$(curl -sL "$api_url")
     fi
@@ -89,7 +93,7 @@ list_releases() {
     # Check installed version
     local installed="(not installed)"
     if [[ -f "$HOME/.reachable/venv/bin/reachctl" ]]; then
-        installed=$($HOME/.reachable/venv/bin/reachctl version 2>/dev/null | head -1 || echo "unknown")
+        installed=$("$HOME/.reachable/venv/bin/reachctl" version 2>/dev/null | head -1 || echo "unknown")
     fi
 
     echo ""
@@ -244,8 +248,8 @@ _retag_vendor_wheels() {
         local base
         base=$(basename "$whl")
         local new="$base"
-        new=$(echo "$new" | sed 's/linux_aarch64/manylinux_2_17_aarch64.manylinux2014_aarch64/g')
-        new=$(echo "$new" | sed 's/linux_x86_64/manylinux_2_17_x86_64.manylinux2014_x86_64/g')
+        new="${new//linux_aarch64/manylinux_2_17_aarch64.manylinux2014_aarch64}"
+        new="${new//linux_x86_64/manylinux_2_17_x86_64.manylinux2014_x86_64}"
         if [ "$base" != "$new" ]; then
             mv "$vendor_dir/$base" "$vendor_dir/$new"
         fi
@@ -277,7 +281,7 @@ _vendor_only_binary_flags() {
             *) flags="$flags --only-binary $pkg" ;;
         esac
     done
-    echo $flags
+    echo "$flags"
 }
 
 print_header() {
@@ -351,8 +355,8 @@ detect_environment() {
     fi
     
     PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    PY_MAJOR=$(echo $PY_VERSION | cut -d. -f1)
-    PY_MINOR=$(echo $PY_VERSION | cut -d. -f2)
+    PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
+    PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
     
     if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ]]; then
         print_error "Python 3.11+ required (found $PY_VERSION)"
@@ -422,7 +426,8 @@ handle_existing_install() {
             echo "    database compatibility issues between versions."
             echo ""
             
-            read -p "  Continue with upgrade (keeps data)? [y/N] " -n 1 -r
+            # F-008: read from /dev/tty so prompts work inside curl | bash (CWE-676)
+            read -p "  Continue with upgrade (keeps data)? [y/N] " -n 1 -r < /dev/tty
             echo ""
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                 print_info "Installation cancelled"
@@ -490,13 +495,17 @@ download_and_install() {
         # built in CI.  Some are deps of guarddog, not reachable — so --find-links
         # alone won't install them.  Install ALL vendor wheels explicitly first.
         if [[ "$HAS_VENDOR" == true ]]; then
-            "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl -q 2>&1 || true
+            # F-009b: vendor wheel install failure is meaningful — do not swallow (CWE-755)
+            if ! "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl -q 2>&1; then
+                print_warn "Some vendor wheels failed to install — main install may still succeed"
+            fi
         fi
 
         # Install the main wheel.  --find-links lets pip resolve any remaining
         # dependencies; --only-binary for each vendor package prevents fallback
         # to source builds when no compiler is present.
         set +e
+        # shellcheck disable=SC2086,SC2046 -- intentional word-splitting for optional pip flags
         PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install \
             $VENDOR_FIND_LINKS \
             $(_vendor_only_binary_flags "$WHEEL_DIR/vendor") \
@@ -525,8 +534,11 @@ download_and_install() {
             done
         fi
         if [[ -n "${GITHUB_PATH:-}" ]]; then
-            echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
-            echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
+            # F-009c: idempotent — don't double-append on re-runs (CWE-426)
+            grep -qxF "$HOME/.reachable/venv/bin" "$GITHUB_PATH" 2>/dev/null \
+                || echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
+            grep -qxF "$HOME/.reachable/tools/bin" "$GITHUB_PATH" 2>/dev/null \
+                || echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
         fi
         return
     fi
@@ -556,38 +568,44 @@ download_and_install() {
     
     print_ok "Downloaded successfully"
 
-    # ── SHA-256 checksum verification ────────────────────────────────────────
+    # ── SHA-256 checksum verification (F-005: fail-closed) ─────────────────
     print_step "Verifying integrity"
     CHECKSUM_URL="https://github.com/${REPO}/releases/download/v${VERSION}/checksums.sha256"
-    if curl -fsSL -L "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
-        if grep -q "$WHEEL_FILE" checksums.sha256; then
-            EXPECTED=$(grep "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
-            if command -v sha256sum &>/dev/null; then
-                ACTUAL=$(sha256sum "$WHEEL_FILE" | awk '{print $1}')
-            else
-                ACTUAL=$(shasum -a 256 "$WHEEL_FILE" | awk '{print $1}')
-            fi
-            if [[ "$EXPECTED" == "$ACTUAL" ]]; then
-                print_ok "SHA-256 checksum verified"
-            else
-                print_error "SHA-256 checksum FAILED — aborting"
-                exit 1
-            fi
-        else
-            print_warn "Checksum entry not found — skipping SHA-256 check"
-        fi
-    else
-        print_warn "Could not fetch checksums — skipping SHA-256 check"
+    if ! curl -fsSL -L "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
+        print_error "Could not fetch checksums.sha256 — aborting (supply chain risk)"
+        print_info "URL: $CHECKSUM_URL"
+        print_info "This file MUST exist for every release. If missing, the release may be compromised."
+        exit 1
     fi
+    if ! grep -q "$WHEEL_FILE" checksums.sha256; then
+        print_error "No checksum entry for $WHEEL_FILE — aborting (supply chain risk)"
+        print_info "The checksums.sha256 file exists but does not contain an entry for this wheel."
+        print_info "This means the wheel was not built by CI or was tampered with after signing."
+        exit 1
+    fi
+    EXPECTED=$(grep "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
+    if command -v sha256sum &>/dev/null; then
+        ACTUAL=$(sha256sum "$WHEEL_FILE" | awk '{print $1}')
+    else
+        ACTUAL=$(shasum -a 256 "$WHEEL_FILE" | awk '{print $1}')
+    fi
+    if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+        print_error "SHA-256 checksum FAILED — aborting"
+        print_info "Expected: $EXPECTED"
+        print_info "Actual:   $ACTUAL"
+        exit 1
+    fi
+    print_ok "SHA-256 checksum verified"
 
     # ── Cosign: auto-install if missing ──────────────────────────────────────
     if ! command -v cosign &>/dev/null; then
         if [[ "$OS" == "darwin" ]] && command -v brew &>/dev/null; then
-            if brew install cosign 2>/dev/null; then
-                print_ok "Installed cosign via Homebrew"
-            else
-                print_warn "cosign install via Homebrew timed out or failed — proceeding"
+            if ! brew install cosign 2>/dev/null; then
+                print_error "Failed to install cosign via Homebrew — aborting"
+                print_info "Install manually: brew install cosign"
+                exit 1
             fi
+            print_ok "Installed cosign via Homebrew"
         elif [[ "$OS" == "linux" ]]; then
             COSIGN_ARCH=$(uname -m)
             if [[ "$COSIGN_ARCH" == "x86_64" ]]; then
@@ -596,40 +614,47 @@ download_and_install() {
                 COSIGN_ARCH="arm64"
             fi
             COSIGN_URL="https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${COSIGN_ARCH}"
-            if curl -fsSL --max-time 15 "$COSIGN_URL" -o /tmp/cosign 2>/dev/null; then
-                chmod +x /tmp/cosign
-                mkdir -p "$HOME/.reachable/tools/bin"
-                mv /tmp/cosign "$HOME/.reachable/tools/bin/cosign"
-                export PATH="$HOME/.reachable/tools/bin:$PATH"
-                print_ok "Installed cosign to ~/.reachable/tools/bin/"
-            else
-                print_warn "cosign download timed out or failed — proceeding"
+            if ! curl -fsSL --max-time 30 "$COSIGN_URL" -o /tmp/cosign 2>/dev/null; then
+                print_error "Failed to download cosign — aborting"
+                print_info "URL: $COSIGN_URL"
+                print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
+                exit 1
             fi
+            chmod +x /tmp/cosign
+            mkdir -p "$HOME/.reachable/tools/bin"
+            mv /tmp/cosign "$HOME/.reachable/tools/bin/cosign"
+            # F-009c: idempotent PATH append (CWE-426)
+            case ":$PATH:" in
+                *":$HOME/.reachable/tools/bin:"*) ;;
+                *) export PATH="$HOME/.reachable/tools/bin:$PATH" ;;
+            esac
+            print_ok "Installed cosign to ~/.reachable/tools/bin/"
+        else
+            print_error "cosign not available and cannot auto-install on this platform — aborting"
+            print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
+            exit 1
         fi
     fi
 
-    # ── Cosign signature verification ─────────────────────────────────────────
+    # ── Cosign signature verification (F-005: fail-closed) ────────────────────
     COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
     BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${COSIGN_BUNDLE}"
-    if command -v cosign &>/dev/null; then
-        if curl -fsSL -L "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
-            if cosign verify-blob \
-                --bundle "$COSIGN_BUNDLE" \
-                --certificate-identity-regexp "https://github.com/sthenos-security/" \
-                --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-                "$WHEEL_FILE" &>/dev/null; then
-                print_ok "Cosign signature verified (Sigstore)"
-            else
-                print_error "Cosign signature verification FAILED — aborting"
-                exit 1
-            fi
-        else
-            print_warn "Could not fetch cosign bundle — skipping signature check"
-        fi
-    else
-        print_warn "cosign not available — signature check skipped (SHA-256 verified)"
-        print_info "Install cosign for full supply chain verification: https://docs.sigstore.dev"
+    if ! curl -fsSL -L "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
+        print_error "Could not fetch cosign bundle — aborting (supply chain risk)"
+        print_info "URL: $BUNDLE_URL"
+        print_info "Every release MUST include a cosign signature bundle."
+        exit 1
     fi
+    if ! cosign verify-blob \
+        --bundle "$COSIGN_BUNDLE" \
+        --certificate-identity-regexp "https://github.com/sthenos-security/" \
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+        "$WHEEL_FILE" &>/dev/null; then
+        print_error "Cosign signature verification FAILED — aborting"
+        print_info "The wheel was not signed by Sthenos Security CI or was tampered with."
+        exit 1
+    fi
+    print_ok "Cosign signature verified (Sigstore)"
 
     # Uninstall previous version
     if pip3 show reachable &> /dev/null; then
@@ -724,7 +749,10 @@ download_and_install() {
     # alone won't install them (pip only resolves deps of the main package).
     # Install ALL vendor wheels explicitly first, then install the main wheel.
     if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
-        "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall vendor/*.whl -q 2>&1 || true
+        # F-009b: vendor wheel install failure is meaningful — do not swallow (CWE-755)
+        if ! "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall vendor/*.whl -q 2>&1; then
+            print_warn "Some vendor wheels failed to install — main install may still succeed"
+        fi
     fi
 
     # Install the main wheel.  --find-links lets pip resolve any remaining
@@ -735,6 +763,7 @@ download_and_install() {
         VENDOR_FIND_LINKS_REMOTE="--find-links vendor/"
     fi
     set +e
+    # shellcheck disable=SC2086,SC2046 -- intentional word-splitting for optional pip flags
     PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install \
         $VENDOR_FIND_LINKS_REMOTE \
         $(_vendor_only_binary_flags vendor/) \
@@ -770,8 +799,11 @@ download_and_install() {
 
     # If running in GitHub Actions, add venv + tools to PATH for subsequent steps
     if [[ -n "${GITHUB_PATH:-}" ]]; then
-        echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
-        echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
+        # F-009c: idempotent — don't double-append on re-runs (CWE-426)
+        grep -qxF "$HOME/.reachable/venv/bin" "$GITHUB_PATH" 2>/dev/null \
+            || echo "$HOME/.reachable/venv/bin" >> "$GITHUB_PATH"
+        grep -qxF "$HOME/.reachable/tools/bin" "$GITHUB_PATH" 2>/dev/null \
+            || echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
     fi
 }
 
