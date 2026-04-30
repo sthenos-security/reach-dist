@@ -40,30 +40,32 @@ REACHABLE runs multiple scanners in one pass and delivers results through an int
 
 ---
 
-## How Reachability Works
+## How It Works
 
-Most scanners tell you a vulnerability exists. REACHABLE tells you if it matters.
+Most scanners tell you a vulnerability exists. REACHABLE tells you if it matters — and proves it.
 
-REACHABLE builds data flow graphs (DFGs) that trace from HTTP entrypoints through your code to each finding. Vulnerabilities not reachable from any entrypoint are marked NOT_REACHABLE, cutting noise by 30-40%. No external toolchain or JVM required.
+<p align="center">
+  <img src="docs/images/how-it-works.svg" alt="Reachable architecture: deterministic pipeline with AI reasoning" width="680"/>
+</p>
 
-Supported languages and frameworks for DFG analysis:
+### Deterministic pipeline
+
+Six scanners run in parallel (CVE, CWE, secrets, DLP, AI risk, malware), then a multi-pass classification engine proves which findings are actually reachable by an attacker. Import resolution, call graph analysis, taint tracking, and framework-aware classifiers eliminate 60–70% of noise — deterministically, with zero AI cost and no data leaving your machine.
 
 | Language | Frameworks |
 |----------|-----------|
-| **Python** | Flask, FastAPI, Django (FBV, CBV, DRF ViewSets), Pydantic |
-| **JavaScript / TypeScript** | Express, Fastify, NestJS, React, Hono |
-| **Go** | Echo, net/http, Gin |
-| **Java** | Spring Boot |
+| **Python** | Flask, FastAPI, Django (FBV, CBV, DRF ViewSets), Pyramid, Pydantic |
+| **JavaScript / TypeScript** | Express, Fastify, NestJS, React, Hono, Sails.js |
+| **Go** | Echo, Gin, net/http |
+| **Java / Kotlin** | Spring Boot |
 
-All languages get CVE, secrets, malware, supply chain, and AI/LLM analysis regardless of DFG support.
+All languages get CVE, secrets, malware, supply chain, and AI/LLM analysis regardless of framework support.
 
----
+### AI reasoning engine
 
-## AI-Powered Analysis
+Findings that deterministic analysis can't fully resolve are passed to a reasoning engine that orchestrates multiple AI agents. Reachability analysis determines whether an attacker can actually exploit a finding given its surrounding code context. Remediation generates fix guidance with code suggestions tailored to your framework.
 
-DFGs tell you *if* a vulnerability is reachable. AI tells you *if it's actually exploitable*.
-
-REACHABLE's AI engine analyzes the code surrounding each finding — variables, control flow, data sources — and determines whether the vulnerability is a real threat or a false positive. Eliminates noise that static analysis alone can't catch.
+Every AI decision is logged to a structured audit trail — model used, input context, output reasoning, confidence score, and cost. Deterministic verdicts always take precedence: AI cannot override a proven REACHABLE or NOT_REACHABLE classification.
 
 AI features include taint verification, deep vulnerability discovery (`--deep-ai-analysis`), and automated remediation (`reachctl fix`, beta).
 
