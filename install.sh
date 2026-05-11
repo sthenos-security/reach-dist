@@ -412,6 +412,19 @@ handle_existing_install() {
                 print_step "Backing up existing data"
                 cp -r "$HOME/.reachable" "$BACKUP_DIR" 2>/dev/null || true
                 print_ok "Backup created: $BACKUP_DIR"
+
+                # Clear AI verdict caches on upgrade — Enzo prompts and AI
+                # discovery prompts can change between versions; stale entries
+                # served by the fast-path cache lookup would mask new behavior
+                # (b76b regression: 100% cache hit served pre-dp_ctx verdicts).
+                # ai-cache.db is also auto-wiped on AI_CACHE_SCHEMA_VERSION_INT
+                # bumps inside init_schema(); this is belt-and-suspenders and
+                # additionally handles ai-discovery.json which has no
+                # schema-version mechanism. Backup above preserves originals.
+                print_step "Clearing AI verdict caches (prompts may have changed)"
+                find "$HOME/.reachable/scans" -name "ai-cache.db" -delete 2>/dev/null || true
+                find "$HOME/.reachable/scans" -name "ai-discovery.json" -delete 2>/dev/null || true
+                print_ok "AI caches cleared — next scan will rebuild fresh verdicts"
             fi
         elif [[ "$CLEAN_DATA" == false ]]; then
             # Fresh install mode without --clean - warn user
