@@ -1,6 +1,6 @@
 # REACHABLE by Sthenos Security
 
-AI-powered application security scanner. REACHABLE combines static analysis, data flow graph (DFG) reachability, and AI to tell you which vulnerabilities are actually exploitable — and which ones are noise. One command, full interactive dashboard, 90 seconds.
+Risk Exposure Validation for the AI era. REACHABLE combines static analysis, data flow graph (DFG) reachability, and focused AI reasoning to validate which findings are truly exploitable, which paths are already defended, and which results still need review. One command, full interactive dashboard, about 90 seconds.
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ REACHABLE runs multiple scanners in one pass and delivers results through an int
 
 ## How It Works
 
-Most scanners tell you a vulnerability exists. REACHABLE tells you if it matters — and proves it.
+Most scanners stop at discovery. REACHABLE goes beyond reachability to validate whether a live path is exploitable, defended, or still uncertain.
 
 <p align="center">
   <img src="docs/images/how-it-works.svg" alt="Reachable architecture: deterministic pipeline with AI reasoning" width="680"/>
@@ -50,7 +50,7 @@ Most scanners tell you a vulnerability exists. REACHABLE tells you if it matters
 
 ### Deterministic pipeline
 
-Six scanners run in parallel (CVE, CWE, secrets, DLP, AI risk, malware), then a multi-pass classification engine proves which findings are actually reachable by an attacker. Import resolution, call graph analysis, taint tracking, and framework-aware classifiers eliminate 60–70% of noise — deterministically, with zero AI cost and no data leaving your machine.
+Six scanners run in parallel (CVE, CWE, secrets, DLP, AI risk, malware), then a multi-pass classification engine proves which findings are actually reachable by an attacker. Import resolution, call graph analysis, taint tracking, and framework-aware classifiers eliminate 60–70% of noise deterministically, with zero AI cost and no data leaving your machine.
 
 | Language | Frameworks |
 |----------|-----------|
@@ -63,7 +63,7 @@ All languages get CVE, secrets, malware, supply chain, and AI/LLM analysis regar
 
 ### AI reasoning engine
 
-Findings that deterministic analysis can't fully resolve are passed to a reasoning engine that orchestrates multiple AI agents. Reachability analysis determines whether an attacker can actually exploit a finding given its surrounding code context. Remediation generates fix guidance with code suggestions tailored to your framework.
+Findings that deterministic analysis cannot fully resolve are passed to a reasoning engine that orchestrates multiple AI agents. That layer helps validate whether a reachable path is actually exploitable, already defended, or still uncertain given its surrounding code context. Remediation generates fix guidance with code suggestions tailored to your framework.
 
 Every AI decision is logged to a structured audit trail — model used, input context, output reasoning, confidence score, and cost. Deterministic verdicts always take precedence: AI cannot override a proven REACHABLE or NOT_REACHABLE classification.
 
@@ -81,9 +81,9 @@ reachctl doctor set openrouter-api-key    # recommended — openrouter.ai/keys
 
 **Other providers:** `anthropic-api-key` (Claude — highest accuracy, ~$0.003/finding), `groq-api-key` (Groq — fastest, ~$0.0004/finding), `openai-api-key` (GPT-4o — ~$0.002/finding). For fully local / air-gapped setups, REACHABLE connects to Ollama or any OpenAI-compatible endpoint — run `reachctl primer` for setup instructions.
 
-Without a key configured, REACHABLE still runs all scanners and DFG reachability — you get full detection, just without the AI verification layer. No code leaves your machine unless an AI key is set.
+Without a key configured, REACHABLE still runs all scanners and DFG reachability. You get full detection, just without the AI validation layer. No code leaves your machine unless an AI key is set.
 
-> **Data disclosure:** AI sends code snippets surrounding each finding (typically 10-30 lines) and finding metadata to the configured provider. Full source files are never sent. Use `--no-ai` for fully local scans even with a key configured.
+> **Data disclosure:** AI sends code snippets surrounding each finding (typically 10-30 lines) and finding metadata to the configured provider. Full source files are never sent. For fully local scans even with a key configured, disable the specific AI passes you do not want to run, such as `--no-ai-owasp`, `--no-ai-reachability`, `--no-ai-discovery`, `--no-ai-package-analysis`, and `--no-attack-prompt`.
 
 ---
 
