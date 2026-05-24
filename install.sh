@@ -14,7 +14,7 @@
 #  Usage:
 #
 #    # Standard install (no auth required)
-#    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+#    curl -fsSL https://sthenosec.com/download/install.sh | bash
 #
 #    # Local wheel install
 #    ./install.sh --wheel /path/to/reachable-<version>-<platform>.whl
@@ -30,6 +30,7 @@ set -euo pipefail
 
 INSTALLER_START_PWD="${PWD:-$(pwd -P 2>/dev/null || pwd)}"
 REACHABLE_TMP_ROOT="$HOME/.reachable/tmp"
+PUBLIC_INSTALL_URL="https://sthenosec.com/download/install.sh"
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -65,7 +66,7 @@ if isinstance(data, dict):
             sys.stderr.write('Error: GitHub API rate limit exceeded (unauthenticated).\n')
             sys.stderr.write('  Fix option 1 — set a token and retry:\n')
             sys.stderr.write('    export GITHUB_TOKEN=\"your_token\"\n')
-            sys.stderr.write('    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash\n')
+            sys.stderr.write('    curl -fsSL https://sthenosec.com/download/install.sh | bash\n')
             sys.stderr.write('  Fix option 2 — wait ~1 hour for the rate limit to reset, then retry.\n')
     else:
         sys.stderr.write('Error resolving latest version: GitHub API: ' + msg + '\n')
@@ -134,7 +135,7 @@ if len(data) > 10:
 
     echo ""
     echo "  Install a specific version:"
-    echo "    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --version 1.0.0b35"
+    echo "    curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --version 1.0.0b35"
     echo ""
 }
 
@@ -981,14 +982,14 @@ run_vibe_setup() {
     if [[ ! -x "$reachctl_bin" ]]; then
         print_warn "reachctl binary not found after install; skipping reach-vibe setup"
         print_info "Retry with the installer from your repo root:"
-        print_info "  curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe --repo /path/to/repo"
+        print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --repo /path/to/repo"
         return
     fi
 
     if [[ ! -d "$workspace" ]]; then
         print_warn "Workspace not found: $workspace"
         print_info "Retry with the installer and an explicit repo path:"
-        print_info "  curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe --repo /path/to/repo"
+        print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --repo /path/to/repo"
         return
     fi
 
@@ -996,7 +997,7 @@ run_vibe_setup() {
         if ! command -v git &>/dev/null || ! git -C "$workspace" rev-parse --show-toplevel &>/dev/null; then
             print_warn "Workspace does not look like a git repository; skipping reach-vibe setup"
             print_info "Retry from your repo root with the installer:"
-            print_info "  curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe"
+            print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe"
             return
         fi
     fi
@@ -1022,11 +1023,23 @@ run_vibe_setup() {
 # Print Success Message
 # -----------------------------------------------------------------------------
 print_success() {
-    local check_updates_cmd="curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --list"
-    local upgrade_cmd="curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update"
+    local check_updates_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --list"
+    local upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update"
+    local path_hint=""
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
-        upgrade_cmd="curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update --vibe"
+        upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update --vibe"
     fi
+    case "$PATH_CONFIG_STATUS" in
+        updated)
+            path_hint="PATH configured in $PATH_CONFIG_TARGET — open a new shell to pick it up."
+            ;;
+        already-configured)
+            path_hint="PATH already configured in $PATH_CONFIG_TARGET."
+            ;;
+        *)
+            path_hint="~/.reachable/venv/bin is available to the installer runtime."
+            ;;
+    esac
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1039,50 +1052,31 @@ print_success() {
     fi
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ${BOLD}Quick Start:${NC}"
-    echo ""
-    echo "    reachctl primer          # View quick-start guide"
+    echo -e "  ${BOLD}Next:${NC}"
     echo "    reachctl scan /path      # Scan a repository"
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
         echo "    reachctl vibe status     # Show bundled reach-vibe daemon status"
     fi
+    echo "    reachctl primer          # Full quick-start guide"
+    echo "    $path_hint"
     echo ""
-    echo -e "  ${BOLD}Shell PATH:${NC}"
-    if [[ "$PATH_CONFIG_STATUS" == "updated" ]]; then
-        echo "    Added ~/.reachable/venv/bin to:"
-        echo "      $PATH_CONFIG_TARGET"
-        echo "    Open a new shell to pick it up."
-        echo "    Shell config updated:"
-        echo "      $PATH_CONFIG_TARGET"
-    elif [[ "$PATH_CONFIG_STATUS" == "already-configured" ]]; then
-        echo "    Already configured in:"
-        echo "      $PATH_CONFIG_TARGET"
-    else
-        echo "    ~/.reachable/venv/bin is available to the installer runtime."
-    fi
-    echo ""
-    echo -e "  ${BOLD}Doctor:${NC}"
-    echo "    Ran automatically during install."
-    echo "    Strongly recommended: add an AI token for better verdict quality and performance."
-    echo "    Standard SDLC: reachctl doctor set openrouter-api-key   # https://openrouter.ai/keys"
+    echo -e "  ${BOLD}Enable AI:${NC}"
+    echo "    Strongly recommended for better verdict quality and performance."
+    echo "    Standard SDLC:  reachctl doctor set openrouter-api-key   # https://openrouter.ai/keys"
     echo "    Codex / OpenAI: reachctl doctor set openai-api-key      # https://platform.openai.com/api-keys"
-    echo "    Claude Code:   reachctl doctor set anthropic-api-key   # https://console.anthropic.com/settings/keys"
-    echo "    Re-run later to add credentials or re-check the environment."
+    echo "    Claude Code:    reachctl doctor set anthropic-api-key   # https://console.anthropic.com/settings/keys"
     echo ""
     if [[ -n "$BACKUP_DIR" ]]; then
-        echo -e "  ${BOLD}Note:${NC} Previous data backed up to:"
-        echo "    $BACKUP_DIR"
+        echo -e "  ${BOLD}Backup:${NC} $BACKUP_DIR"
         echo ""
     fi
-    echo -e "  ${BOLD}Version:${NC}"
+    echo -e "  ${BOLD}Maintain:${NC}"
     echo "    Installed: v${VERSION}"
-    echo "    Check for updates:  $check_updates_cmd"
+    echo "    Releases:  $check_updates_cmd"
+    echo "    Upgrade:   $upgrade_cmd"
     echo ""
-    echo -e "  ${BOLD}Upgrade:${NC}"
-    echo "    $upgrade_cmd"
-    echo ""
-    echo -e "  ${BOLD}Support:${NC} info@sthenosec.com"
-    echo -e "  ${BOLD}Copyright:${NC} © 2026 Sthenos Security. All rights reserved."
+    echo "  Docs: https://sthenosec.com  |  Support: info@sthenosec.com"
+    echo "  © 2026 Sthenos Security. All rights reserved."
     echo ""
 }
 

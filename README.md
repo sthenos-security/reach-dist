@@ -6,7 +6,7 @@ Risk Exposure Validation for the AI era. REACHABLE combines static analysis, dat
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
+curl -fsSL https://sthenosec.com/download/install.sh | bash
 
 # Open a new shell (installer writes PATH to your shell rc automatically)
 # or source ~/.zshrc / ~/.bashrc once in the current shell
@@ -24,7 +24,7 @@ That's it. When the scan finishes, open the dashboard link printed in the termin
 For local coding-agent protection, the first-cut install path is shell-first:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe
 ```
 
 That path:
@@ -141,7 +141,7 @@ Plans: **Free** (single user, public repos), **Team**, and **Enterprise**.
 ## Upgrade
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --update
 ```
 
 Use `--clean` when upgrading from a beta release to avoid database compatibility issues. Other installer options: `--version <ver>` to pin a specific version, `--wheel <path>` for local installs, `--list` to see available releases.
