@@ -153,6 +153,7 @@ ENABLE_VIBE_CODING=false
 VIBE_WORKSPACE=""
 VIBE_SKIP_BASELINE=false
 VIBE_AGENTS=()
+VIBE_UI_URL=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -210,15 +211,17 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h         Show this help"
             echo ""
             echo "Examples:"
-            echo "  ./install.sh                    # Fresh install (latest release)"
-            echo "  ./install.sh --list             # Show available versions"
-            echo "  ./install.sh --update           # Upgrade with backup"
-            echo "  ./install.sh --clean            # Clean install"
-            echo "  ./install.sh --version 1.0.0b35 # Install specific version"
-            echo "  ./install.sh --wheel ./file.whl # Local wheel install"
-            echo "  ./install.sh --vibe                         # Install + wire detected coding agents"
-            echo "  ./install.sh --vibe --agent codex          # Install + wire Codex only"
-            echo "  ./install.sh --vibe --no-auto-vibe         # Install + defer first vibe scan"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash                 # Fresh install (latest release)"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --list    # Show available versions"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update  # Upgrade with backup"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --clean   # Clean install"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --version 1.0.0b35"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --agent codex"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --no-auto-vibe"
+            echo ""
+            echo "Local checkout only (run from the reach-dist repo root):"
+            echo "  ./install.sh --wheel ./file.whl"
+            echo "  ./install.sh --vibe"
             echo ""
             exit 0
             ;;
@@ -1013,6 +1016,12 @@ run_vibe_setup() {
 
     if "${vibe_cmd[@]}"; then
         print_ok "reach-vibe installed for $workspace"
+        local ui_output
+        ui_output="$("$reachctl_bin" vibe ui --repo "$workspace" --no-open 2>/dev/null || true)"
+        VIBE_UI_URL="$(printf '%s\n' "$ui_output" | awk '/^https?:\/\// { url = $0 } END { print url }')"
+        if [[ -n "$VIBE_UI_URL" ]]; then
+            print_info "Dashboard: $VIBE_UI_URL"
+        fi
     else
         print_warn "reach-vibe setup failed, but REACHABLE itself is installed"
         print_info "Retry later with: ${vibe_cmd[*]}"
@@ -1025,6 +1034,7 @@ run_vibe_setup() {
 print_success() {
     local check_updates_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --list"
     local upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update"
+    local doctor_hint="reachctl doctor          # Add AI and GitHub tokens"
     local path_hint=""
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
         upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update --vibe"
@@ -1052,28 +1062,34 @@ print_success() {
     fi
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ${BOLD}Next:${NC}"
-    echo "    reachctl scan /path      # Scan a repository"
+    echo -e "  ${BOLD}Start Here:${NC}"
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
-        echo "    reachctl vibe status     # Show bundled reach-vibe daemon status"
+        if [[ -n "$VIBE_UI_URL" ]]; then
+            echo "    Dashboard: $VIBE_UI_URL"
+        fi
+        echo "    reachctl vibe ui         # Open the local vibe dashboard"
+        echo "    reachctl vibe status     # Show daemon and latest scan state"
+    else
+        echo "    reachctl scan /path      # Scan a repository"
     fi
     echo "    reachctl primer          # Full quick-start guide"
     echo "    $path_hint"
     echo ""
     echo -e "  ${BOLD}Enable AI:${NC}"
     echo "    Strongly recommended for better verdict quality and performance."
-    echo "    Standard SDLC:  reachctl doctor set openrouter-api-key   # https://openrouter.ai/keys"
-    echo "    Codex / OpenAI: reachctl doctor set openai-api-key      # https://platform.openai.com/api-keys"
-    echo "    Claude Code:    reachctl doctor set anthropic-api-key   # https://console.anthropic.com/settings/keys"
+    echo "    $doctor_hint"
+    echo "    OpenRouter: https://openrouter.ai/settings/keys"
+    echo "    OpenAI:     https://platform.openai.com/api-keys"
+    echo "    Anthropic:  https://console.anthropic.com/settings/keys"
     echo ""
     if [[ -n "$BACKUP_DIR" ]]; then
         echo -e "  ${BOLD}Backup:${NC} $BACKUP_DIR"
         echo ""
     fi
     echo -e "  ${BOLD}Maintain:${NC}"
-    echo "    Installed: v${VERSION}"
-    echo "    Releases:  $check_updates_cmd"
-    echo "    Upgrade:   $upgrade_cmd"
+    echo "    Installed:     v${VERSION}"
+    echo "    List releases: $check_updates_cmd"
+    echo "    Upgrade:       $upgrade_cmd"
     echo ""
     echo "  Docs: https://sthenosec.com  |  Support: info@sthenosec.com"
     echo "  © 2026 Sthenos Security. All rights reserved."

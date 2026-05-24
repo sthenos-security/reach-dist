@@ -40,13 +40,16 @@ If you are testing locally from the `reach-dist` checkout:
 ./install.sh --vibe
 ```
 
-Useful variants:
+Useful public installer variants:
 
 ```bash
-./install.sh --vibe --agent codex
-./install.sh --vibe --agent cursor --no-auto-vibe
-./install.sh --vibe --repo /path/to/repo
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent codex
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent cursor --no-auto-vibe
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --repo /path/to/repo
 ```
+
+Node.js is not required just to install or run `reach-vibe`. Keep Node
+available if the target repo itself uses Node/npm tooling.
 
 The npm / `npx` entrypoint is planned next, but it will be a thin wrapper over
 this same installer path, not a separate installer implementation.
