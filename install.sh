@@ -28,6 +28,9 @@
 
 set -euo pipefail
 
+INSTALLER_START_PWD="${PWD:-$(pwd -P 2>/dev/null || pwd)}"
+REACHABLE_TMP_ROOT="$HOME/.reachable/tmp"
+
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
@@ -131,7 +134,7 @@ if len(data) > 10:
 
     echo ""
     echo "  Install a specific version:"
-    echo "    ./install.sh --version 1.0.0b35"
+    echo "    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --version 1.0.0b35"
     echo ""
 }
 
@@ -640,7 +643,8 @@ download_and_install() {
     # Remote install - download from GitHub
     print_step "Downloading wheel"
     
-    DOWNLOAD_DIR=$(mktemp -d)
+    mkdir -p "$REACHABLE_TMP_ROOT"
+    DOWNLOAD_DIR=$(mktemp -d "$REACHABLE_TMP_ROOT/install.XXXXXX")
     cd "$DOWNLOAD_DIR"
     
     print_info "Repository: github.com/$REPO"
@@ -708,15 +712,17 @@ download_and_install() {
                 COSIGN_ARCH="arm64"
             fi
             COSIGN_URL="https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${COSIGN_ARCH}"
-            if ! curl -fsSL --max-time 30 "$COSIGN_URL" -o /tmp/cosign 2>/dev/null; then
+            local cosign_tmp
+            cosign_tmp=$(mktemp "$REACHABLE_TMP_ROOT/cosign.XXXXXX")
+            if ! curl -fsSL --max-time 30 "$COSIGN_URL" -o "$cosign_tmp" 2>/dev/null; then
                 print_error "Failed to download cosign — aborting"
                 print_info "URL: $COSIGN_URL"
                 print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
                 exit 1
             fi
-            chmod +x /tmp/cosign
+            chmod +x "$cosign_tmp"
             mkdir -p "$HOME/.reachable/tools/bin"
-            mv /tmp/cosign "$HOME/.reachable/tools/bin/cosign"
+            mv "$cosign_tmp" "$HOME/.reachable/tools/bin/cosign"
             # F-009c: idempotent PATH append (CWE-426)
             case ":$PATH:" in
                 *":$HOME/.reachable/tools/bin:"*) ;;
@@ -888,6 +894,14 @@ download_and_install() {
         done
     fi
 
+    # Restore the caller's working directory before deleting the temp tree.
+    # This matters for curl | bash --vibe installs, where reach-vibe should
+    # default to the repo the user launched the installer from, not the
+    # transient download directory.
+    if [[ -d "$INSTALLER_START_PWD" ]]; then
+        cd "$INSTALLER_START_PWD"
+    fi
+
     # Cleanup
     rm -rf "$DOWNLOAD_DIR"
 
@@ -931,6 +945,16 @@ verify_installation() {
 resolve_vibe_workspace() {
     if [[ -n "$VIBE_WORKSPACE" ]]; then
         echo "$VIBE_WORKSPACE"
+        return
+    fi
+    if [[ -n "${INSTALLER_START_PWD:-}" ]] && [[ -d "$INSTALLER_START_PWD" ]]; then
+        if command -v git &>/dev/null; then
+            if git -C "$INSTALLER_START_PWD" rev-parse --show-toplevel &>/dev/null; then
+                git -C "$INSTALLER_START_PWD" rev-parse --show-toplevel
+                return
+            fi
+        fi
+        echo "$INSTALLER_START_PWD"
         return
     fi
     if command -v git &>/dev/null; then
@@ -998,6 +1022,12 @@ run_vibe_setup() {
 # Print Success Message
 # -----------------------------------------------------------------------------
 print_success() {
+    local check_updates_cmd="curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --list"
+    local upgrade_cmd="curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update"
+    if [[ "$ENABLE_VIBE_CODING" == true ]]; then
+        upgrade_cmd="curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update --vibe"
+    fi
+
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     if [[ "$UPDATE_MODE" == true ]]; then
@@ -1021,8 +1051,9 @@ print_success() {
     if [[ "$PATH_CONFIG_STATUS" == "updated" ]]; then
         echo "    Added ~/.reachable/venv/bin to:"
         echo "      $PATH_CONFIG_TARGET"
-        echo "    Open a new shell, or run:"
-        echo "      source $PATH_CONFIG_TARGET"
+        echo "    Open a new shell to pick it up."
+        echo "    Shell config updated:"
+        echo "      $PATH_CONFIG_TARGET"
     elif [[ "$PATH_CONFIG_STATUS" == "already-configured" ]]; then
         echo "    Already configured in:"
         echo "      $PATH_CONFIG_TARGET"
@@ -1041,10 +1072,10 @@ print_success() {
     fi
     echo -e "  ${BOLD}Version:${NC}"
     echo "    Installed: v${VERSION}"
-    echo "    Check for updates:  ./install.sh --list"
+    echo "    Check for updates:  $check_updates_cmd"
     echo ""
     echo -e "  ${BOLD}Upgrade:${NC}"
-    echo "    curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --update"
+    echo "    $upgrade_cmd"
     echo ""
     echo -e "  ${BOLD}Support:${NC} info@sthenosec.com"
     echo ""
