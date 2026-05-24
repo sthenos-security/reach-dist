@@ -145,6 +145,10 @@ UPDATE_MODE=false
 CUSTOM_VERSION=""
 CLEAN_DATA=false
 LOCAL_WHEEL=""
+ENABLE_VIBE_CODING=false
+VIBE_WORKSPACE=""
+VIBE_SKIP_BASELINE=false
+VIBE_AGENTS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -164,6 +168,24 @@ while [[ $# -gt 0 ]]; do
             LOCAL_WHEEL="$2"
             shift 2
             ;;
+        --vibe-coding|--vibe)
+            ENABLE_VIBE_CODING=true
+            shift
+            ;;
+        --agent)
+            ENABLE_VIBE_CODING=true
+            VIBE_AGENTS+=("$2")
+            shift 2
+            ;;
+        --repo|--workspace)
+            VIBE_WORKSPACE="$2"
+            shift 2
+            ;;
+        --no-auto-vibe|--skip-vibe-baseline)
+            ENABLE_VIBE_CODING=true
+            VIBE_SKIP_BASELINE=true
+            shift
+            ;;
         --help|-h)
             echo "REACHABLE Installer"
             echo ""
@@ -175,6 +197,11 @@ while [[ $# -gt 0 ]]; do
             echo "  --clean            Remove existing data before install"
             echo "  --version, -v VER  Install specific version (e.g., 1.0.0b35)"
             echo "  --wheel, -w FILE   Install from local wheel file (skips download)"
+            echo "  --vibe-coding      Run bundled reach-vibe setup after install"
+            echo "  --vibe             Alias for --vibe-coding"
+            echo "  --agent NAME       Restrict reach-vibe wiring to a specific agent"
+            echo "  --repo DIR         Repo root for reach-vibe setup (defaults to current repo)"
+            echo "  --no-auto-vibe     Skip the initial reach-vibe baseline scan"
             echo "  --list, -l         List available releases"
             echo "  --help, -h         Show this help"
             echo ""
@@ -185,6 +212,9 @@ while [[ $# -gt 0 ]]; do
             echo "  ./install.sh --clean            # Clean install"
             echo "  ./install.sh --version 1.0.0b35 # Install specific version"
             echo "  ./install.sh --wheel ./file.whl # Local wheel install"
+            echo "  ./install.sh --vibe                         # Install + wire detected coding agents"
+            echo "  ./install.sh --vibe --agent codex          # Install + wire Codex only"
+            echo "  ./install.sh --vibe --no-auto-vibe         # Install + defer first vibe scan"
             echo ""
             exit 0
             ;;
@@ -309,6 +339,56 @@ print_error() {
 
 print_info() {
     echo -e "  ${DIM}$1${NC}"
+}
+
+PATH_CONFIG_TARGET=""
+PATH_CONFIG_STATUS="unchanged"
+
+_shell_rc_path() {
+    local shell_name
+    shell_name=$(basename "${SHELL:-}")
+    case "$shell_name" in
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        bash)
+            if [[ -f "$HOME/.bashrc" || ! -f "$HOME/.bash_profile" ]]; then
+                echo "$HOME/.bashrc"
+            else
+                echo "$HOME/.bash_profile"
+            fi
+            ;;
+        *)
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+configure_shell_path() {
+    local reach_path="$HOME/.reachable/venv/bin"
+    local rc_file
+
+    case ":$PATH:" in
+        *":$reach_path:"*) ;;
+        *) export PATH="$reach_path:$PATH" ;;
+    esac
+
+    rc_file="$(_shell_rc_path)"
+    PATH_CONFIG_TARGET="$rc_file"
+    mkdir -p "$(dirname "$rc_file")"
+    touch "$rc_file"
+
+    if grep -Fq "$reach_path" "$rc_file" 2>/dev/null; then
+        PATH_CONFIG_STATUS="already-configured"
+        return
+    fi
+
+    {
+        echo ""
+        echo "# Added by REACHABLE installer"
+        echo "export PATH=\"\$HOME/.reachable/venv/bin:\$PATH\""
+    } >> "$rc_file"
+    PATH_CONFIG_STATUS="updated"
 }
 
 # -----------------------------------------------------------------------------
@@ -553,6 +633,7 @@ download_and_install() {
             grep -qxF "$HOME/.reachable/tools/bin" "$GITHUB_PATH" 2>/dev/null \
                 || echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
         fi
+        configure_shell_path
         return
     fi
     
@@ -818,6 +899,8 @@ download_and_install() {
         grep -qxF "$HOME/.reachable/tools/bin" "$GITHUB_PATH" 2>/dev/null \
             || echo "$HOME/.reachable/tools/bin" >> "$GITHUB_PATH"
     fi
+
+    configure_shell_path
 }
 
 # -----------------------------------------------------------------------------
@@ -845,6 +928,72 @@ verify_installation() {
     "$VENV_REACHCTL" version 2>&1 | sed 's/^/  /'
 }
 
+resolve_vibe_workspace() {
+    if [[ -n "$VIBE_WORKSPACE" ]]; then
+        echo "$VIBE_WORKSPACE"
+        return
+    fi
+    if command -v git &>/dev/null; then
+        if git -C "$PWD" rev-parse --show-toplevel &>/dev/null; then
+            git -C "$PWD" rev-parse --show-toplevel
+            return
+        fi
+    fi
+    echo "$PWD"
+}
+
+run_vibe_setup() {
+    if [[ "$ENABLE_VIBE_CODING" != true ]]; then
+        return
+    fi
+
+    local reachctl_bin="$HOME/.reachable/venv/bin/reachctl"
+    local workspace
+    workspace="$(resolve_vibe_workspace)"
+
+    print_step "Configuring reach-vibe"
+    print_info "Workspace: $workspace"
+
+    if [[ ! -x "$reachctl_bin" ]]; then
+        print_warn "reachctl binary not found after install; skipping reach-vibe setup"
+        print_info "Retry with the installer from your repo root:"
+        print_info "  curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe --repo /path/to/repo"
+        return
+    fi
+
+    if [[ ! -d "$workspace" ]]; then
+        print_warn "Workspace not found: $workspace"
+        print_info "Retry with the installer and an explicit repo path:"
+        print_info "  curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe --repo /path/to/repo"
+        return
+    fi
+
+    if [[ ! -d "$workspace/.git" ]]; then
+        if ! command -v git &>/dev/null || ! git -C "$workspace" rev-parse --show-toplevel &>/dev/null; then
+            print_warn "Workspace does not look like a git repository; skipping reach-vibe setup"
+            print_info "Retry from your repo root with the installer:"
+            print_info "  curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe"
+            return
+        fi
+    fi
+
+    local -a vibe_cmd=("$reachctl_bin" vibe install --repo "$workspace" --ci)
+    local agent_name
+    for agent_name in "${VIBE_AGENTS[@]}"; do
+        vibe_cmd+=(--agent "$agent_name")
+    done
+    if [[ "$VIBE_SKIP_BASELINE" == true ]]; then
+        vibe_cmd+=(--no-auto-vibe)
+    fi
+
+    if "${vibe_cmd[@]}"; then
+        print_ok "reach-vibe installed for $workspace"
+    else
+        print_warn "reach-vibe setup failed, but REACHABLE itself is installed"
+        print_info "Retry later with: ${vibe_cmd[*]}"
+    fi
+}
+
 # -----------------------------------------------------------------------------
 # Print Success Message
 # -----------------------------------------------------------------------------
@@ -863,12 +1012,27 @@ print_success() {
     echo -e "  ${BOLD}Quick Start:${NC}"
     echo ""
     echo "    reachctl primer          # View quick-start guide"
-    echo "    reachctl doctor          # Check/install dependencies"
     echo "    reachctl scan /path      # Scan a repository"
+    if [[ "$ENABLE_VIBE_CODING" == true ]]; then
+        echo "    reachctl vibe status     # Show bundled reach-vibe daemon status"
+    fi
     echo ""
-    echo -e "  ${BOLD}Add to PATH:${NC}"
-    echo "    export PATH=\"\$HOME/.reachable/venv/bin:\$PATH\""
-    echo "    # Add to ~/.zshrc or ~/.bashrc to make permanent"
+    echo -e "  ${BOLD}Shell PATH:${NC}"
+    if [[ "$PATH_CONFIG_STATUS" == "updated" ]]; then
+        echo "    Added ~/.reachable/venv/bin to:"
+        echo "      $PATH_CONFIG_TARGET"
+        echo "    Open a new shell, or run:"
+        echo "      source $PATH_CONFIG_TARGET"
+    elif [[ "$PATH_CONFIG_STATUS" == "already-configured" ]]; then
+        echo "    Already configured in:"
+        echo "      $PATH_CONFIG_TARGET"
+    else
+        echo "    ~/.reachable/venv/bin is available to the installer runtime."
+    fi
+    echo ""
+    echo -e "  ${BOLD}Doctor:${NC}"
+    echo "    Ran automatically during install."
+    echo "    Re-run later only if you want to add credentials or re-check the environment."
     echo ""
     if [[ -n "$BACKUP_DIR" ]]; then
         echo -e "  ${BOLD}Note:${NC} Previous data backed up to:"
@@ -904,6 +1068,7 @@ main() {
     handle_existing_install
     download_and_install
     verify_installation
+    run_vibe_setup
     print_success
 }
 

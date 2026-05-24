@@ -8,11 +8,8 @@ Risk Exposure Validation for the AI era. REACHABLE combines static analysis, dat
 # Install
 curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash
 
-# Add to PATH (add this line to your ~/.zshrc or ~/.bashrc)
-export PATH="$HOME/.reachable/venv/bin:$PATH"
-
-# Set up tools and credentials
-reachctl doctor
+# Open a new shell (installer writes PATH to your shell rc automatically)
+# or source ~/.zshrc / ~/.bashrc once in the current shell
 
 # Scan
 reachctl scan /path/to/your/repo
@@ -21,6 +18,52 @@ reachctl scan /path/to/your/repo
 That's it. When the scan finishes, open the dashboard link printed in the terminal — or run `reachctl dashboard --open`.
 
 **Requirements:** Python 3.11+ and either Linux (x86_64/ARM64) or macOS (Apple Silicon/Intel).
+
+### Vibe-coding quick start
+
+For local coding-agent protection, the first-cut install path is shell-first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sthenos-security/reach-dist/main/install.sh | bash -s -- --vibe
+```
+
+That path:
+
+- installs the main `reachable` wheel
+- bootstraps external tools automatically
+- runs bundled `reach-vibe` setup
+- wires supported local coding agents in the current repo
+
+If you are testing locally from the `reach-dist` checkout:
+
+```bash
+./install.sh --vibe
+```
+
+Useful variants:
+
+```bash
+./install.sh --vibe --agent codex
+./install.sh --vibe --agent cursor --no-auto-vibe
+./install.sh --vibe --repo /path/to/repo
+```
+
+The npm / `npx` entrypoint is planned next, but it will be a thin wrapper over
+this same installer path, not a separate installer implementation.
+
+### Tokens and limited mode
+
+First-run vibe-coding setup should not block on tokens.
+
+Today the intended posture is:
+
+- no-token mode still installs and works
+- `reachctl doctor` remains the canonical way to add optional credentials later
+- external tools are installed automatically by the installer
+
+Optional credentials such as GitHub / MCP tokens and AI provider keys improve
+coverage and AI-assisted behavior, but they are not required for the initial
+shell-first install path.
 
 ---
 
