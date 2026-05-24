@@ -48,6 +48,16 @@ curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent
 curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --repo /path/to/repo
 ```
 
+After install:
+
+```bash
+reachctl vibe ui                       # open the global dashboard
+reachctl vibe status                   # show daemon + all known workspaces
+reachctl vibe status --repo /path/to/repo
+reachctl vibe stats --repo /path/to/repo
+ps -ef | grep '[r]each_agent _daemon'  # low-level daemon check
+```
+
 Node.js is not required just to install or run `reach-vibe`. Keep Node
 available if the target repo itself uses Node/npm tooling.
 
