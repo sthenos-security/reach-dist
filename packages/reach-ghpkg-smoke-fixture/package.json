@@ -1,0 +1,19 @@
+{
+  "name": "@sthenos-security/reach-ghpkg-smoke-fixture",
+  "version": "0.0.0-smoke.1",
+  "description": "Tiny smoke-only GitHub Packages fixture for validating private npm.pkg.github.com access.",
+  "license": "MIT",
+  "private": false,
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sthenos-security/reach-dist.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
