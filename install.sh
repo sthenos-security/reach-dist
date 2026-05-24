@@ -1063,7 +1063,11 @@ print_success() {
     echo ""
     echo -e "  ${BOLD}Doctor:${NC}"
     echo "    Ran automatically during install."
-    echo "    Re-run later only if you want to add credentials or re-check the environment."
+    echo "    Strongly recommended: add an AI token for better verdict quality and performance."
+    echo "    Standard SDLC: reachctl doctor set openrouter-api-key   # https://openrouter.ai/keys"
+    echo "    Codex / OpenAI: reachctl doctor set openai-api-key      # https://platform.openai.com/api-keys"
+    echo "    Claude Code:   reachctl doctor set anthropic-api-key   # https://console.anthropic.com/settings/keys"
+    echo "    Re-run later to add credentials or re-check the environment."
     echo ""
     if [[ -n "$BACKUP_DIR" ]]; then
         echo -e "  ${BOLD}Note:${NC} Previous data backed up to:"
@@ -1078,6 +1082,7 @@ print_success() {
     echo "    $upgrade_cmd"
     echo ""
     echo -e "  ${BOLD}Support:${NC} info@sthenosec.com"
+    echo -e "  ${BOLD}Copyright:${NC} © 2026 Sthenos Security. All rights reserved."
     echo ""
 }
 
