@@ -186,7 +186,7 @@ while [[ $# -gt 0 ]]; do
             VIBE_WORKSPACE="$2"
             shift 2
             ;;
-        --no-auto-vibe|--skip-vibe-baseline)
+        --no-auto-vibe|--skip-vibe-baseline|--no-baseline)
             ENABLE_VIBE_CODING=true
             VIBE_SKIP_BASELINE=true
             shift
@@ -206,7 +206,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --vibe             Alias for --vibe-coding"
             echo "  --agent NAME       Restrict reach-vibe wiring to a specific agent"
             echo "  --repo DIR         Repo root for reach-vibe setup (defaults to current repo)"
-            echo "  --no-auto-vibe     Skip the initial reach-vibe baseline scan"
+            echo "  --no-baseline      Skip the initial reach-vibe baseline scan"
+            echo "  --no-auto-vibe     Alias for --no-baseline"
             echo "  --list, -l         List available releases"
             echo "  --help, -h         Show this help"
             echo ""
@@ -217,7 +218,7 @@ while [[ $# -gt 0 ]]; do
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --clean   # Clean install"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --version 1.0.0b35"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --agent codex"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --no-auto-vibe"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --no-baseline"
             echo ""
             echo "Local checkout only (run from the reach-dist repo root):"
             echo "  ./install.sh --wheel ./file.whl"
