@@ -62,7 +62,7 @@ reachctl vibe status                   # show daemon + all known workspaces
 reachctl vibe status --repo /path/to/repo
 reachctl vibe stats --repo /path/to/repo
 reachctl vibe remediate --repo /path/to/repo --branch-name reach-vibe-demo
-reachctl vibe prompt --repo /path/to/repo --agent codex --all
+reachctl remediate --repo /path/to/repo --agent codex --all
 ps -ef | grep '[r]each_agent _daemon'  # low-level daemon check
 ```
 
@@ -73,7 +73,7 @@ explicit `reachctl vibe remediate` run. For reviewable code changes, pass
 `--branch-name`; the installer does not silently create a branch or rewrite the
 repo.
 
-For CI or desktop agent orchestration, `reachctl vibe prompt` writes
+For CI or desktop agent orchestration, `reachctl remediate` writes
 `.reachable/remediation-bundle/prompt.md`, `bundle.json`, `ai-rules/`, and
 `remediation-prompt-audit.json`. Reachable owns scan truth, ranking, audit, and
 the proof rescan; Codex, Claude Code, Cursor, OpenCode, Copilot, or another
@@ -214,7 +214,7 @@ AI runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KE
 For CI mode with threshold gating: `reachctl scan /path --ci --fail-on high`
 
 For CI remediation demos, run `reachctl scan . --ci`, generate a bundle with
-`reachctl vibe prompt --workspace . --agent opencode --all`, pass
+`reachctl remediate --workspace . --agent opencode --all`, pass
 `.reachable/remediation-bundle/prompt.md` to the selected coding-agent action,
 then rescan the `reachable-remediate-<run-id>` branch and require
 `reachctl audit --latest --summary` plus `reachctl integrity --latest` to pass.
