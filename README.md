@@ -62,6 +62,7 @@ reachctl vibe status                   # show daemon + all known workspaces
 reachctl vibe status --repo /path/to/repo
 reachctl vibe stats --repo /path/to/repo
 reachctl vibe remediate --repo /path/to/repo --branch-name reach-vibe-demo
+reachctl vibe prompt --repo /path/to/repo --agent codex --all
 ps -ef | grep '[r]each_agent _daemon'  # low-level daemon check
 ```
 
@@ -71,6 +72,29 @@ agent guidance. Those rules are used on the next hook/MCP/agent event or by an
 explicit `reachctl vibe remediate` run. For reviewable code changes, pass
 `--branch-name`; the installer does not silently create a branch or rewrite the
 repo.
+
+For CI or desktop agent orchestration, `reachctl vibe prompt` writes
+`.reachable/remediation-bundle/prompt.md`, `bundle.json`, `ai-rules/`, and
+`remediation-prompt-audit.json`. Reachable owns scan truth, ranking, audit, and
+the proof rescan; Codex, Claude Code, Cursor, OpenCode, Copilot, or another
+configured coding agent owns the code edits.
+
+Supported local agent config locations:
+
+| Agent | Primary config |
+|---|---|
+| Codex | `$CODEX_HOME/config.toml` or `~/.codex/config.toml`; workspace hooks in `.codex/hooks.json`; rules in `AGENTS.md` |
+| Claude Code | `.claude/settings.json`; MCP via `claude mcp add`; rules in `CLAUDE.md` and `.claude/skills/*/SKILL.md` |
+| Cursor | `.cursor/mcp.json`, plus `~/.cursor/projects/<workspace>/mcps`; rules in `.cursor/rules/*.mdc` |
+| OpenCode | workspace `opencode.json`; optional `$OPENCODE_CONFIG` or `~/.config/opencode/opencode.json` |
+| Copilot | `.vscode/mcp.json` for GitHub/Copilot workflows |
+
+Developer check:
+
+```bash
+python scripts/reach_agent_config_check.py --workspace /path/to/repo \
+  --agents codex,claude,cursor,opencode --json
+```
 
 Node.js is not required just to install or run `reach-vibe`. Keep Node
 available if the target repo itself uses Node/npm tooling.
@@ -188,6 +212,14 @@ Fork one of these repos and your pipeline runs REACHABLE automatically:
 AI runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` is set as a repo secret.
 
 For CI mode with threshold gating: `reachctl scan /path --ci --fail-on high`
+
+For CI remediation demos, run `reachctl scan . --ci`, generate a bundle with
+`reachctl vibe prompt --workspace . --agent opencode --all`, pass
+`.reachable/remediation-bundle/prompt.md` to the selected coding-agent action,
+then rescan the `reachable-remediate-<run-id>` branch and require
+`reachctl audit --latest --summary` plus `reachctl integrity --latest` to pass.
+Set agent/provider secrets such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`OPENROUTER_API_KEY`, `GITHUB_TOKEN`, and `MCP_GITHUB_TOKEN` as needed.
 
 ---
 
