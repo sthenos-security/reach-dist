@@ -206,7 +206,7 @@ Fork one of these repos and your pipeline runs REACHABLE automatically:
 | Platform | Repo |
 |---|---|
 | GitHub Actions | [reach-testbed-github](https://github.com/sthenos-security/reach-testbed-github) |
-| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security/sthenos-security) |
+| GitLab CI | [reach-testbed-gitlab](https://gitlab.com/sthenos-security-public/reach-testbed-gitlab) |
 | Jenkins | [`jenkins/Jenkinsfile`](jenkins/Jenkinsfile) in this repo |
 
 AI runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` is set as a repo secret.
