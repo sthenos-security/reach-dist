@@ -782,11 +782,13 @@ download_and_install() {
     # Download hash-pinned constraints (blocks supply chain attacks on dependencies)
     CONSTRAINTS_URL="https://github.com/${REPO}/releases/download/v${VERSION}/constraints.txt"
     CONSTRAINTS_FLAG=""
+    CONSTRAINTS_MODE="none"
     if curl -fsSL -L "$CONSTRAINTS_URL" -o constraints.txt 2>/dev/null; then
         if grep -q "\-\-hash=" constraints.txt 2>/dev/null; then
-            CONSTRAINTS_FLAG="--constraint constraints.txt --require-hashes"
+            CONSTRAINTS_MODE="hash"
             print_ok "Dependency constraints verified (hash-pinned)"
         else
+            CONSTRAINTS_MODE="version"
             CONSTRAINTS_FLAG="--constraint constraints.txt"
             print_ok "Dependency constraints loaded (version-pinned)"
         fi
@@ -858,6 +860,25 @@ download_and_install() {
         if ! "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall vendor/*.whl -q 2>&1; then
             print_warn "Some vendor wheels failed to install — main install may still succeed"
         fi
+    fi
+
+    # Hash-checking mode applies to every requirement being installed. The
+    # Reachable wheel is a local, already checksum/cosign-verified artifact, so
+    # install dependencies from constraints first, then install the wheel with
+    # --no-deps. This keeps dependency artifact hashes enforced without making
+    # pip demand a second hash line for the local wheel path.
+    if [[ "$CONSTRAINTS_MODE" == "hash" ]]; then
+        set +e
+        DEPS_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install --require-hashes -r constraints.txt 2>&1)
+        DEPS_RC=$?
+        set -e
+        if [[ $DEPS_RC -ne 0 ]]; then
+            print_error "dependency install failed under hash constraints (exit $DEPS_RC)"
+            echo "$DEPS_OUTPUT" | tail -30
+            exit 1
+        fi
+        print_ok "Dependency install verified from hash-pinned constraints"
+        CONSTRAINTS_FLAG="--no-deps"
     fi
 
     # Install the main wheel.  --find-links lets pip resolve any remaining
