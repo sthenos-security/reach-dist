@@ -1,6 +1,6 @@
 # REACHABLE by Sthenos Security
 
-Risk Exposure Validation for the AI era. REACHABLE inventories code and dependencies, discovers security signals, proves reachability, validates exposure, and drives remediation so teams can reduce exploitable risk first. One command, full interactive dashboard, about 90 seconds.
+Risk Exposure Validation for the AI era. REACHABLE combines deterministic validation, bounded AI reasoning, and agentic remediation to reduce exploitable risk first. One command, full interactive dashboard, about 90 seconds.
 
 ## Quick Start
 
@@ -136,7 +136,7 @@ REACHABLE runs multiple scanners in one pass and delivers results through an int
 
 ## How It Works
 
-REACHABLE follows one high-level risk exposure reduction flow: inventory, discovery, reachability, exposure validation, and remediation. The goal is simple: reduce exploitable risk first, keep defended paths out of the urgent queue, and produce evidence teams can trust.
+REACHABLE follows one high-level AI-assisted risk exposure reduction flow: inventory, discovery, reachability, exposure validation, and remediation. The goal is simple: reduce exploitable risk first, keep defended paths out of the urgent queue, and produce evidence teams can trust.
 
 <p align="center">
   <img src="docs/images/how-it-works.svg" alt="High-level REACHABLE workflow: inventory, discovery, reachability, exposure validation, and remediation" width="760"/>
