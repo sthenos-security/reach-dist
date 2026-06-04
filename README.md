@@ -139,7 +139,7 @@ REACHABLE runs multiple scanners in one pass and delivers results through an int
 REACHABLE follows one high-level risk exposure reduction flow: inventory, discovery, reachability, exposure validation, and remediation. The goal is simple: reduce exploitable risk first, keep defended paths out of the urgent queue, and produce evidence teams can trust.
 
 <p align="center">
-  <img src="docs/images/how-it-works.svg" alt="High-level REACHABLE workflow: inventory, discovery, reachability, exposure validation, and remediation" width="680"/>
+  <img src="docs/images/how-it-works.svg" alt="High-level REACHABLE workflow: inventory, discovery, reachability, exposure validation, and remediation" width="760"/>
 </p>
 
 ### Validation workflow
