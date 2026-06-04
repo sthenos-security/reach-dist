@@ -1,29 +1,35 @@
 <svg width="100%" viewBox="0 0 680 400" xmlns="http://www.w3.org/2000/svg">
-<title>Reachable — How it works</title>
-<desc>Simplified architecture: deterministic scan pipeline with AI reasoning layer</desc>
+<title>REACHABLE - How it works</title>
+<desc>High-level REACHABLE workflow: inventory, discovery, reachability, exposure validation, and remediation.</desc>
 
 <style>
   @media (prefers-color-scheme: light) {
     :root {
-      --text-primary: #1A1A1A; --text-secondary: #6B6A65; --border: rgba(0,0,0,0.15);
-      --teal-fill: #E1F5EE; --teal-stroke: #0F6E56; --teal-title: #085041; --teal-sub: #0F6E56;
-      --purple-fill: #EEEDFE; --purple-stroke: #534AB7; --purple-title: #3C3489; --purple-sub: #534AB7;
-      --gray-fill: #F1EFE8; --gray-stroke: #5F5E5A; --gray-title: #444441; --gray-sub: #5F5E5A;
-      --connector: #7F77DD;
+      --text-primary: #1A1A1A; --text-secondary: #666C75; --border: rgba(0,0,0,0.14);
+      --input-fill: #F3F5F7; --input-stroke: #64748B; --input-title: #334155; --input-sub: #64748B;
+      --scan-fill: #E2F8F0; --scan-stroke: #0F766E; --scan-title: #115E59; --scan-sub: #0F766E;
+      --ai-fill: #EEF2FF; --ai-stroke: #6366F1; --ai-title: #4338CA; --ai-sub: #6366F1;
+      --fix-fill: #FFF7ED; --fix-stroke: #EA580C; --fix-title: #9A3412; --fix-sub: #EA580C;
+      --out-fill: #F8FAFC; --out-stroke: #64748B; --out-title: #334155; --out-sub: #64748B;
+      --connector: #64748B; --feedback: #A855F7;
     }
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --text-primary: #E8E6DF; --text-secondary: #9C9A92; --border: rgba(255,255,255,0.15);
-      --teal-fill: #085041; --teal-stroke: #5DCAA5; --teal-title: #9FE1CB; --teal-sub: #5DCAA5;
-      --purple-fill: #26215C; --purple-stroke: #AFA9EC; --purple-title: #CECBF6; --purple-sub: #AFA9EC;
-      --gray-fill: #2C2C2A; --gray-stroke: #B4B2A9; --gray-title: #D3D1C7; --gray-sub: #B4B2A9;
-      --connector: #AFA9EC;
+      --text-primary: #E8EEF8; --text-secondary: #9AA4B2; --border: rgba(255,255,255,0.13);
+      --input-fill: #111827; --input-stroke: #64748B; --input-title: #E2E8F0; --input-sub: #94A3B8;
+      --scan-fill: #062F2D; --scan-stroke: #5EEAD4; --scan-title: #A7F3D0; --scan-sub: #5EEAD4;
+      --ai-fill: #1E1B4B; --ai-stroke: #A5B4FC; --ai-title: #C7D2FE; --ai-sub: #A5B4FC;
+      --fix-fill: #431407; --fix-stroke: #FDBA74; --fix-title: #FED7AA; --fix-sub: #FDBA74;
+      --out-fill: #161B22; --out-stroke: #94A3B8; --out-title: #E2E8F0; --out-sub: #94A3B8;
+      --connector: #94A3B8; --feedback: #C084FC;
     }
   }
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  .th { font-size: 14px; font-weight: 500; }
-  .ts { font-size: 12px; font-weight: 400; }
+  .title { font-size: 14px; font-weight: 650; }
+  .sub { font-size: 11.5px; font-weight: 450; }
+  .eyebrow { font-size: 10px; font-weight: 650; letter-spacing: 0.08em; }
+  .small { font-size: 10.5px; font-weight: 450; }
 </style>
 
 <defs>
@@ -32,80 +38,89 @@
   </marker>
 </defs>
 
-<!-- ===== INPUT ===== -->
-<rect x="40" y="40" width="100" height="50" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.5"/>
-<text class="th" x="90" y="58" text-anchor="middle" dominant-baseline="central" fill="var(--gray-title)">Your code</text>
-<text class="ts" x="90" y="74" text-anchor="middle" dominant-baseline="central" fill="var(--gray-sub)">+ dependencies</text>
+<!-- Input and output -->
+<rect x="34" y="44" width="118" height="58" rx="10" fill="var(--input-fill)" stroke="var(--input-stroke)" stroke-width="0.7"/>
+<text class="title" x="93" y="65" text-anchor="middle" dominant-baseline="central" fill="var(--input-title)">Codebase</text>
+<text class="sub" x="93" y="83" text-anchor="middle" dominant-baseline="central" fill="var(--input-sub)">code + dependencies</text>
 
-<line x1="140" y1="65" x2="168" y2="65" stroke="var(--teal-stroke)" stroke-width="1" marker-end="url(#arrow)"/>
+<rect x="528" y="44" width="118" height="58" rx="10" fill="var(--out-fill)" stroke="var(--out-stroke)" stroke-width="0.7"/>
+<text class="title" x="587" y="65" text-anchor="middle" dominant-baseline="central" fill="var(--out-title)">Evidence</text>
+<text class="sub" x="587" y="83" text-anchor="middle" dominant-baseline="central" fill="var(--out-sub)">dashboard + CI</text>
 
-<!-- ===== PIPELINE ===== -->
-<rect x="174" y="40" width="120" height="50" rx="8" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.5"/>
-<text class="th" x="234" y="58" text-anchor="middle" dominant-baseline="central" fill="var(--teal-title)">Scan</text>
-<text class="ts" x="234" y="74" text-anchor="middle" dominant-baseline="central" fill="var(--teal-sub)">6 scanner types</text>
+<line x1="152" y1="73" x2="199" y2="73" stroke="var(--connector)" stroke-width="1" marker-end="url(#arrow)" opacity="0.72"/>
+<line x1="481" y1="73" x2="528" y2="73" stroke="var(--connector)" stroke-width="1" marker-end="url(#arrow)" opacity="0.72"/>
 
-<line x1="294" y1="65" x2="318" y2="65" stroke="var(--teal-stroke)" stroke-width="1" marker-end="url(#arrow)"/>
+<rect x="206" y="38" width="268" height="70" rx="12" fill="var(--scan-fill)" stroke="var(--scan-stroke)" stroke-width="0.7"/>
+<text class="eyebrow" x="340" y="58" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">LOCAL-FIRST RISK EXPOSURE REDUCTION</text>
+<text class="title" x="340" y="78" text-anchor="middle" dominant-baseline="central" fill="var(--scan-title)">One workflow for AI-DLC and SDLC</text>
+<text class="sub" x="340" y="94" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">validate exposure, reduce exploitable risk</text>
 
-<rect x="324" y="40" width="120" height="50" rx="8" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.5"/>
-<text class="th" x="384" y="58" text-anchor="middle" dominant-baseline="central" fill="var(--teal-title)">Classify</text>
-<text class="ts" x="384" y="74" text-anchor="middle" dominant-baseline="central" fill="var(--teal-sub)">Reachability proof</text>
+<!-- Five-stage flow -->
+<line x1="72" y1="194" x2="604" y2="194" stroke="var(--connector)" stroke-width="1" opacity="0.35"/>
 
-<line x1="444" y1="65" x2="468" y2="65" stroke="var(--teal-stroke)" stroke-width="1" marker-end="url(#arrow)"/>
+<rect x="36" y="142" width="112" height="92" rx="12" fill="var(--scan-fill)" stroke="var(--scan-stroke)" stroke-width="0.7"/>
+<text class="eyebrow" x="92" y="160" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">01</text>
+<text class="title" x="92" y="184" text-anchor="middle" dominant-baseline="central" fill="var(--scan-title)">Inventory</text>
+<text class="sub" x="92" y="207" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">map code, packages,</text>
+<text class="sub" x="92" y="222" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">APIs, and signals</text>
 
-<rect x="474" y="40" width="120" height="50" rx="8" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.5"/>
-<text class="th" x="534" y="58" text-anchor="middle" dominant-baseline="central" fill="var(--teal-title)">Correlate</text>
-<text class="ts" x="534" y="74" text-anchor="middle" dominant-baseline="central" fill="var(--teal-sub)">Cross-signal links</text>
+<line x1="148" y1="194" x2="164" y2="194" stroke="var(--connector)" stroke-width="1" marker-end="url(#arrow)" opacity="0.78"/>
 
-<line x1="594" y1="65" x2="618" y2="65" stroke="var(--gray-stroke)" stroke-width="1" marker-end="url(#arrow)"/>
+<rect x="170" y="142" width="112" height="92" rx="12" fill="var(--ai-fill)" stroke="var(--ai-stroke)" stroke-width="0.7"/>
+<text class="eyebrow" x="226" y="160" text-anchor="middle" dominant-baseline="central" fill="var(--ai-sub)">02</text>
+<text class="title" x="226" y="184" text-anchor="middle" dominant-baseline="central" fill="var(--ai-title)">Discovery</text>
+<text class="sub" x="226" y="207" text-anchor="middle" dominant-baseline="central" fill="var(--ai-sub)">find CVE, CWE,</text>
+<text class="sub" x="226" y="222" text-anchor="middle" dominant-baseline="central" fill="var(--ai-sub)">AI, DLP, secrets</text>
 
-<rect x="624" y="45" width="40" height="40" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.5"/>
-<text class="ts" x="644" y="65" text-anchor="middle" dominant-baseline="central" fill="var(--gray-title)">Report</text>
+<line x1="282" y1="194" x2="298" y2="194" stroke="var(--connector)" stroke-width="1" marker-end="url(#arrow)" opacity="0.78"/>
 
-<!-- ===== BIDIRECTIONAL CONNECTORS ===== -->
-<line x1="310" y1="90" x2="310" y2="130" stroke="var(--connector)" stroke-width="0.8" marker-end="url(#arrow)" opacity="0.45"/>
-<line x1="460" y1="90" x2="460" y2="130" stroke="var(--connector)" stroke-width="0.8" marker-end="url(#arrow)" opacity="0.45"/>
-<line x1="296" y1="130" x2="296" y2="90" stroke="var(--connector)" stroke-width="0.8" marker-end="url(#arrow)" opacity="0.25"/>
-<line x1="446" y1="130" x2="446" y2="90" stroke="var(--connector)" stroke-width="0.8" marker-end="url(#arrow)" opacity="0.25"/>
+<rect x="304" y="142" width="112" height="92" rx="12" fill="var(--scan-fill)" stroke="var(--scan-stroke)" stroke-width="0.7"/>
+<text class="eyebrow" x="360" y="160" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">03</text>
+<text class="title" x="360" y="184" text-anchor="middle" dominant-baseline="central" fill="var(--scan-title)">Reachability</text>
+<text class="sub" x="360" y="207" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">prove executable</text>
+<text class="sub" x="360" y="222" text-anchor="middle" dominant-baseline="central" fill="var(--scan-sub)">paths in context</text>
 
-<!-- ===== REASONING ENGINE ===== -->
-<rect x="174" y="132" width="420" height="46" rx="10" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.5"/>
-<text class="th" x="384" y="148" text-anchor="middle" dominant-baseline="central" fill="var(--purple-title)">Reasoning engine</text>
-<text class="ts" x="384" y="165" text-anchor="middle" dominant-baseline="central" fill="var(--purple-sub)">Multiple AI agents — every decision audited</text>
+<line x1="416" y1="194" x2="432" y2="194" stroke="var(--connector)" stroke-width="1" marker-end="url(#arrow)" opacity="0.78"/>
 
-<!-- Dashed lines to agents -->
-<line x1="290" y1="178" x2="290" y2="208" stroke="var(--connector)" stroke-width="0.8" opacity="0.35" stroke-dasharray="3 3"/>
-<line x1="480" y1="178" x2="480" y2="208" stroke="var(--connector)" stroke-width="0.8" opacity="0.35" stroke-dasharray="3 3"/>
+<rect x="438" y="142" width="112" height="92" rx="12" fill="var(--ai-fill)" stroke="var(--ai-stroke)" stroke-width="0.7"/>
+<text class="eyebrow" x="494" y="160" text-anchor="middle" dominant-baseline="central" fill="var(--ai-sub)">04</text>
+<text class="title" x="494" y="184" text-anchor="middle" dominant-baseline="central" fill="var(--ai-title)">Exposure</text>
+<text class="sub" x="494" y="207" text-anchor="middle" dominant-baseline="central" fill="var(--ai-sub)">validate attackable,</text>
+<text class="sub" x="494" y="222" text-anchor="middle" dominant-baseline="central" fill="var(--ai-sub)">defended, uncertain</text>
 
-<!-- ===== AGENTS ===== -->
-<rect x="174" y="210" width="200" height="56" rx="8" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.5"/>
-<text class="th" x="274" y="230" text-anchor="middle" dominant-baseline="central" fill="var(--purple-title)">Reachability analysis</text>
-<text class="ts" x="274" y="248" text-anchor="middle" dominant-baseline="central" fill="var(--purple-sub)">Can an attacker reach this?</text>
+<line x1="550" y1="194" x2="566" y2="194" stroke="var(--connector)" stroke-width="1" marker-end="url(#arrow)" opacity="0.78"/>
 
-<rect x="394" y="210" width="200" height="56" rx="8" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.5"/>
-<text class="th" x="494" y="230" text-anchor="middle" dominant-baseline="central" fill="var(--purple-title)">Remediation</text>
-<text class="ts" x="494" y="248" text-anchor="middle" dominant-baseline="central" fill="var(--purple-sub)">How do I fix this?</text>
+<rect x="572" y="142" width="112" height="92" rx="12" fill="var(--fix-fill)" stroke="var(--fix-stroke)" stroke-width="0.7"/>
+<text class="eyebrow" x="628" y="160" text-anchor="middle" dominant-baseline="central" fill="var(--fix-sub)">05</text>
+<text class="title" x="628" y="184" text-anchor="middle" dominant-baseline="central" fill="var(--fix-title)">Remediation</text>
+<text class="sub" x="628" y="207" text-anchor="middle" dominant-baseline="central" fill="var(--fix-sub)">agent or CI fixes</text>
+<text class="sub" x="628" y="222" text-anchor="middle" dominant-baseline="central" fill="var(--fix-sub)">with proof</text>
 
-<!-- ===== OUTCOMES ===== -->
-<line x1="40" y1="296" x2="640" y2="296" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="4 4"/>
+<!-- Feedback loop -->
+<path d="M628 242 C628 282 94 282 94 242" fill="none" stroke="var(--feedback)" stroke-width="1" stroke-dasharray="5 5" marker-end="url(#arrow)" opacity="0.58"/>
+<text class="small" x="340" y="270" text-anchor="middle" dominant-baseline="central" fill="var(--text-secondary)">AI-DLC loop: validation feedback updates the coding workflow before the next change ships</text>
 
-<rect x="40" y="316" width="185" height="50" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.5"/>
-<text class="th" x="132" y="334" text-anchor="middle" dominant-baseline="central" fill="var(--gray-title)">64% noise eliminated</text>
-<text class="ts" x="132" y="350" text-anchor="middle" dominant-baseline="central" fill="var(--gray-sub)">Before any AI runs</text>
+<!-- Outcomes -->
+<line x1="40" y1="302" x2="640" y2="302" stroke="var(--border)" stroke-width="0.7" stroke-dasharray="4 4"/>
 
-<rect x="247" y="316" width="185" height="50" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.5"/>
-<text class="th" x="340" y="334" text-anchor="middle" dominant-baseline="central" fill="var(--gray-title)">Full audit trail</text>
-<text class="ts" x="340" y="350" text-anchor="middle" dominant-baseline="central" fill="var(--gray-sub)">Every decision provable</text>
+<rect x="40" y="322" width="185" height="48" rx="9" fill="var(--out-fill)" stroke="var(--out-stroke)" stroke-width="0.7"/>
+<text class="title" x="132" y="340" text-anchor="middle" dominant-baseline="central" fill="var(--out-title)">Less noise</text>
+<text class="sub" x="132" y="356" text-anchor="middle" dominant-baseline="central" fill="var(--out-sub)">prioritize reachable exposure</text>
 
-<rect x="454" y="316" width="185" height="50" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.5"/>
-<text class="th" x="547" y="334" text-anchor="middle" dominant-baseline="central" fill="var(--gray-title)">Sub-$1 per scan</text>
-<text class="ts" x="547" y="350" text-anchor="middle" dominant-baseline="central" fill="var(--gray-sub)">AI cost controlled</text>
+<rect x="247" y="322" width="185" height="48" rx="9" fill="var(--out-fill)" stroke="var(--out-stroke)" stroke-width="0.7"/>
+<text class="title" x="340" y="340" text-anchor="middle" dominant-baseline="central" fill="var(--out-title)">Clear priority</text>
+<text class="sub" x="340" y="356" text-anchor="middle" dominant-baseline="central" fill="var(--out-sub)">fix attackable paths first</text>
 
-<!-- ===== LEGEND ===== -->
-<rect x="40" y="388" width="10" height="10" rx="2" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.5"/>
-<text class="ts" x="56" y="398" fill="var(--text-secondary)">Deterministic</text>
-<rect x="150" y="388" width="10" height="10" rx="2" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.5"/>
-<text class="ts" x="166" y="398" fill="var(--text-secondary)">AI reasoning</text>
-<rect x="260" y="388" width="10" height="10" rx="2" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.5"/>
-<text class="ts" x="276" y="398" fill="var(--text-secondary)">Outcomes</text>
+<rect x="454" y="322" width="185" height="48" rx="9" fill="var(--out-fill)" stroke="var(--out-stroke)" stroke-width="0.7"/>
+<text class="title" x="547" y="340" text-anchor="middle" dominant-baseline="central" fill="var(--out-title)">Audit-ready proof</text>
+<text class="sub" x="547" y="356" text-anchor="middle" dominant-baseline="central" fill="var(--out-sub)">evidence, hashes, reports</text>
+
+<!-- Legend -->
+<rect x="40" y="388" width="10" height="10" rx="2" fill="var(--scan-fill)" stroke="var(--scan-stroke)" stroke-width="0.5"/>
+<text class="small" x="56" y="397" fill="var(--text-secondary)">deterministic validation</text>
+<rect x="190" y="388" width="10" height="10" rx="2" fill="var(--ai-fill)" stroke="var(--ai-stroke)" stroke-width="0.5"/>
+<text class="small" x="206" y="397" fill="var(--text-secondary)">bounded AI reasoning</text>
+<rect x="344" y="388" width="10" height="10" rx="2" fill="var(--fix-fill)" stroke="var(--fix-stroke)" stroke-width="0.5"/>
+<text class="small" x="360" y="397" fill="var(--text-secondary)">remediation workflow</text>
 
 </svg>

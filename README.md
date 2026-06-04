@@ -1,6 +1,6 @@
 # REACHABLE by Sthenos Security
 
-Risk Exposure Validation for the AI era. REACHABLE combines static analysis, data flow graph (DFG) reachability, and focused AI reasoning to validate which findings are truly exploitable, which paths are already defended, and which results still need review. One command, full interactive dashboard, about 90 seconds.
+Risk Exposure Validation for the AI era. REACHABLE inventories code and dependencies, discovers security signals, proves reachability, validates exposure, and drives remediation so teams can reduce exploitable risk first. One command, full interactive dashboard, about 90 seconds.
 
 ## Quick Start
 
@@ -122,13 +122,13 @@ shell-first install path.
 
 REACHABLE runs multiple scanners in one pass and delivers results through an interactive HTML dashboard.
 
-**Vulnerabilities** — CVEs in your dependencies, with DFG reachability analysis. CWE code weaknesses (injection, auth flaws, crypto misuse) with source-level tracing. Hardcoded secrets and API keys. Application misconfigurations.
+**Vulnerabilities** — CVEs in your dependencies, with reachability analysis. CWE code weaknesses (injection, auth flaws, crypto misuse) with source-level tracing. Hardcoded secrets and API keys. Application misconfigurations.
 
 **Supply Chain** — Malware detection with behavioral sandbox analysis. Package health scoring. Typosquatting and dependency confusion detection.
 
 **AI/LLM Security** — OWASP LLM Top 10 coverage. AI attack surface mapping across your codebase.
 
-**Data Protection** — PII leakage and data exposure via taint analysis.
+**Data Protection** — PII leakage and data exposure analysis.
 
 **Compliance** — Automated mapping to FedRAMP, CMMC 2.0, NIST 800-53, SOC2, and PCI-DSS.
 
@@ -136,15 +136,15 @@ REACHABLE runs multiple scanners in one pass and delivers results through an int
 
 ## How It Works
 
-Most scanners stop at discovery. REACHABLE goes beyond reachability to validate whether a live path is exploitable, defended, or still uncertain.
+REACHABLE follows one high-level risk exposure reduction flow: inventory, discovery, reachability, exposure validation, and remediation. The goal is simple: reduce exploitable risk first, keep defended paths out of the urgent queue, and produce evidence teams can trust.
 
 <p align="center">
-  <img src="docs/images/how-it-works.svg" alt="Reachable architecture: deterministic pipeline with AI reasoning" width="680"/>
+  <img src="docs/images/how-it-works.svg" alt="High-level REACHABLE workflow: inventory, discovery, reachability, exposure validation, and remediation" width="680"/>
 </p>
 
-### Deterministic pipeline
+### Validation workflow
 
-Six scanners run in parallel (CVE, CWE, secrets, DLP, AI risk, malware), then a multi-pass classification engine proves which findings are actually reachable by an attacker. Import resolution, call graph analysis, taint tracking, and framework-aware classifiers eliminate 60–70% of noise deterministically, with zero AI cost and no data leaving your machine.
+REACHABLE inventories the codebase, discovers security signals across source and dependencies, proves which paths are reachable, then validates whether reachable exposure is attackable, defended, or still uncertain. This keeps attention on risk that can actually matter instead of raw alert volume.
 
 | Language | Frameworks |
 |----------|-----------|
@@ -155,13 +155,11 @@ Six scanners run in parallel (CVE, CWE, secrets, DLP, AI risk, malware), then a 
 
 All languages get CVE, secrets, malware, supply chain, and AI/LLM analysis regardless of framework support.
 
-### AI reasoning engine
+### Remediation workflow
 
-Findings that deterministic analysis cannot fully resolve are passed to a reasoning engine that orchestrates multiple AI agents. That layer helps validate whether a reachable path is actually exploitable, already defended, or still uncertain given its surrounding code context. Remediation generates fix guidance with code suggestions tailored to your framework.
+Remediation follows the validation result. REACHABLE prioritizes attackable exposure first, preserves defended paths as evidence, and hands fix work to the local or CI workflow with proof after rescan. In AI-DLC mode, validation feedback guides the next coding-agent pass before the next change ships.
 
-Every AI decision is logged to a structured audit trail — model used, input context, output reasoning, confidence score, and cost. Deterministic verdicts always take precedence: AI cannot override a proven REACHABLE or NOT_REACHABLE classification.
-
-AI features include taint verification, deep vulnerability discovery (`--deep-ai-analysis`), and automated remediation (`reachctl fix`, beta).
+Every decision is logged with enough metadata to support review, reporting, and governance evidence. Customer source code, prompt bodies, and private logs are not part of the public evidence export.
 
 ### Set up an AI provider
 
@@ -175,7 +173,7 @@ reachctl doctor set openrouter-api-key    # recommended — openrouter.ai/keys
 
 **Other providers:** `anthropic-api-key` (Claude — highest accuracy, ~$0.003/finding), `groq-api-key` (Groq — fastest, ~$0.0004/finding), `openai-api-key` (GPT-4o — ~$0.002/finding). For fully local / air-gapped setups, REACHABLE connects to Ollama or any OpenAI-compatible endpoint — run `reachctl primer` for setup instructions.
 
-Without a key configured, REACHABLE still runs all scanners and DFG reachability. You get full detection, just without the AI validation layer. No code leaves your machine unless an AI key is set.
+Without a key configured, REACHABLE still runs all scanners and reachability analysis. You get full detection, just without the AI validation layer. No code leaves your machine unless an AI key is set.
 
 > **Data disclosure:** AI sends code snippets surrounding each finding (typically 10-30 lines) and finding metadata to the configured provider. Full source files are never sent. For fully local scans even with a key configured, disable the specific AI passes you do not want to run, such as `--no-ai-owasp`, `--no-ai-reachability`, `--no-ai-discovery`, `--no-ai-package-analysis`, and `--no-attack-prompt`.
 
@@ -225,7 +223,7 @@ Set agent/provider secrets such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 
 ## Going Further
 
-For everything beyond the basics — AI remediation (`reachctl fix`), supply chain detonation sandboxes, air-gapped / local AI with Ollama, CI/CD integration, scan options, and more — run:
+For everything beyond the basics — agentic remediation, supply chain validation, air-gapped / local AI with Ollama, CI/CD integration, scan options, and more — run:
 
 ```bash
 reachctl primer
