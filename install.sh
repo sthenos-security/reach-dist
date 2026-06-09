@@ -1029,9 +1029,11 @@ run_vibe_setup() {
 
     local -a vibe_cmd=("$reachctl_bin" vibe install --repo "$workspace" --ci)
     local agent_name
-    for agent_name in "${VIBE_AGENTS[@]}"; do
-        vibe_cmd+=(--agent "$agent_name")
-    done
+    if ((${#VIBE_AGENTS[@]})); then
+        for agent_name in "${VIBE_AGENTS[@]}"; do
+            vibe_cmd+=(--agent "$agent_name")
+        done
+    fi
     if [[ "$VIBE_SKIP_BASELINE" == true ]]; then
         vibe_cmd+=(--no-auto-vibe)
     fi
