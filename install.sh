@@ -445,10 +445,25 @@ detect_environment() {
     PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
     PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
+    PY_BIN="$(command -v python3)"
+    PY_ARCH="$(python3 -c "import platform; print(platform.machine())" 2>/dev/null || echo unknown)"
     
     if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ]]; then
         print_error "Python 3.11+ required (found $PY_VERSION)"
         exit 1
+    fi
+
+    if [[ "$OS" == "darwin" ]]; then
+        HW_ARM64="$(sysctl -in hw.optional.arm64 2>/dev/null || echo 0)"
+        PROC_TRANSLATED="$(sysctl -in sysctl.proc_translated 2>/dev/null || echo 0)"
+        if [[ "$HW_ARM64" == "1" && "$PY_ARCH" == "x86_64" ]]; then
+            print_warn "Intel/Rosetta Python detected on Apple Silicon: $PY_BIN"
+            print_warn "REACHABLE ships universal2 wheels, but native Python is more reliable."
+            print_warn "Recommended: install/use /opt/homebrew/bin/python3, then rerun the installer."
+        elif [[ "$PROC_TRANSLATED" == "1" ]]; then
+            print_warn "Installer appears to be running under Rosetta translation."
+            print_warn "Recommended: rerun from a native ARM64 terminal with /opt/homebrew/bin/python3."
+        fi
     fi
     
     PY_TAG="cp${PY_VERSION//./}"
@@ -798,7 +813,7 @@ download_and_install() {
 
     # Download pre-compiled vendor wheels (C extensions: psutil, ruamel.yaml.clib)
     # Built and signed in CI — no PyPI contact, no compiler needed on customer machine.
-    # Only published for Linux — macOS ships with Xcode command line tools.
+    # Only published for Linux — macOS users who need source builds need Xcode CLT.
     HAS_VENDOR_REMOTE=false
     if [[ "$OS" == "linux" ]]; then
         VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
@@ -950,10 +965,19 @@ verify_installation() {
     print_header "Verification"
     
     VENV_REACHCTL="$HOME/.reachable/venv/bin/reachctl"
+    DOCTOR_LOG="$(mktemp -t reachable-doctor.XXXXXX)"
 
     echo ""
     echo -e "${BOLD}Doctor:${NC}"
-    "$VENV_REACHCTL" doctor --full 2>&1 | sed 's/^/  /'
+    if "$VENV_REACHCTL" doctor --full >"$DOCTOR_LOG" 2>&1; then
+        sed 's/^/  /' "$DOCTOR_LOG"
+        rm -f "$DOCTOR_LOG"
+    else
+        sed 's/^/  /' "$DOCTOR_LOG"
+        rm -f "$DOCTOR_LOG"
+        print_error "Verification failed: reachctl doctor --full did not complete successfully"
+        exit 1
+    fi
 
     echo ""
     echo -e "${BOLD}Self-test:${NC}"
