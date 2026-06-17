@@ -36,18 +36,28 @@ PUBLIC_INSTALL_URL="https://sthenosec.com/download/install.sh"
 # Configuration
 # -----------------------------------------------------------------------------
 REPO="sthenos-security/reach-dist"
+RELEASES_API_TOKEN="${GITHUB_TOKEN:-${MCP_GITHUB_TOKEN:-}}"
+
+github_curl() {
+    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
+        printf 'header = "Authorization: Bearer %s"\n' "${RELEASES_API_TOKEN}" \
+            | curl --config - "$@"
+    else
+        curl "$@"
+    fi
+}
 
 # Resolve latest version from reach-dist GitHub releases API.
-# Uses GITHUB_TOKEN if set (avoids rate limits in CI).
+# Uses GITHUB_TOKEN or MCP_GITHUB_TOKEN if set (avoids rate limits in CI and
+# local agent-driven environments).
 # Unauthenticated limit: 60 req/hr per IP. Authenticated: 5000 req/hr.
 resolve_version() {
     local api_url="https://api.github.com/repos/${REPO}/releases"
     local response
 
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
         # F-006a: pass token via --config stdin, not CLI args (CWE-214)
-        response=$(printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN}" \
-            | curl -sL --config - "$api_url")
+        response=$(github_curl -sL "$api_url")
     else
         response=$(curl -sL "$api_url")
     fi
@@ -57,15 +67,16 @@ import sys, json, os
 data = json.load(sys.stdin)
 if isinstance(data, dict):
     msg = data.get('message', 'unknown error')
-    has_token = bool(os.environ.get('GITHUB_TOKEN',''))
+    has_token = bool(os.environ.get('GITHUB_TOKEN','') or os.environ.get('MCP_GITHUB_TOKEN',''))
     if 'rate limit' in msg.lower():
         if has_token:
-            sys.stderr.write('Error: GitHub API rate limit exceeded even with GITHUB_TOKEN.\n')
+            sys.stderr.write('Error: GitHub API rate limit exceeded even with GITHUB_TOKEN or MCP_GITHUB_TOKEN.\n')
             sys.stderr.write('  Your token may be invalid or scoped incorrectly.\n')
         else:
             sys.stderr.write('Error: GitHub API rate limit exceeded (unauthenticated).\n')
             sys.stderr.write('  Fix option 1 — set a token and retry:\n')
             sys.stderr.write('    export GITHUB_TOKEN=\"your_token\"\n')
+            sys.stderr.write('    # or: export MCP_GITHUB_TOKEN=\"your_token\"\n')
             sys.stderr.write('    curl -fsSL https://sthenosec.com/download/install.sh | bash\n')
             sys.stderr.write('  Fix option 2 — wait ~1 hour for the rate limit to reset, then retry.\n')
     else:
@@ -79,17 +90,16 @@ if not tag:
     sys.stderr.write('Error resolving latest version: missing tag_name\n')
     sys.exit(1)
 print(tag.lstrip('v'))
-" GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+" GITHUB_TOKEN="${GITHUB_TOKEN:-}" MCP_GITHUB_TOKEN="${MCP_GITHUB_TOKEN:-}"
 }
 
 list_releases() {
     local api_url="https://api.github.com/repos/${REPO}/releases"
     local response
 
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
         # F-006a: pass token via --config stdin, not CLI args (CWE-214)
-        response=$(printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN}" \
-            | curl -sL --config - "$api_url")
+        response=$(github_curl -sL "$api_url")
     else
         response=$(curl -sL "$api_url")
     fi
@@ -672,7 +682,7 @@ download_and_install() {
     print_info "File:       $WHEEL_FILE"
     
     WHEEL_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${WHEEL_FILE}"
-    if ! curl -fsSL -L "$WHEEL_URL" -o "$WHEEL_FILE"; then
+    if ! github_curl -fsSL -L "$WHEEL_URL" -o "$WHEEL_FILE"; then
         print_error "Download failed"
         echo ""
         echo "  URL: $WHEEL_URL"
@@ -689,7 +699,7 @@ download_and_install() {
     # ── SHA-256 checksum verification (F-005: fail-closed) ─────────────────
     print_step "Verifying integrity"
     CHECKSUM_URL="https://github.com/${REPO}/releases/download/v${VERSION}/checksums.sha256"
-    if ! curl -fsSL -L "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
+    if ! github_curl -fsSL -L "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
         print_error "Could not fetch checksums.sha256 — aborting (supply chain risk)"
         print_info "URL: $CHECKSUM_URL"
         print_info "This file MUST exist for every release. If missing, the release may be compromised."
@@ -759,7 +769,7 @@ download_and_install() {
     # ── Cosign signature verification (F-005: fail-closed) ────────────────────
     COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
     BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${COSIGN_BUNDLE}"
-    if ! curl -fsSL -L "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
+    if ! github_curl -fsSL -L "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
         print_error "Could not fetch cosign bundle — aborting (supply chain risk)"
         print_info "URL: $BUNDLE_URL"
         print_info "Every release MUST include a cosign signature bundle."
@@ -798,7 +808,7 @@ download_and_install() {
     CONSTRAINTS_URL="https://github.com/${REPO}/releases/download/v${VERSION}/constraints.txt"
     CONSTRAINTS_FLAG=""
     CONSTRAINTS_MODE="none"
-    if curl -fsSL -L "$CONSTRAINTS_URL" -o constraints.txt 2>/dev/null; then
+    if github_curl -fsSL -L "$CONSTRAINTS_URL" -o constraints.txt 2>/dev/null; then
         if grep -q "\-\-hash=" constraints.txt 2>/dev/null; then
             CONSTRAINTS_MODE="hash"
             print_ok "Dependency constraints verified (hash-pinned)"
@@ -818,7 +828,7 @@ download_and_install() {
     if [[ "$OS" == "linux" ]]; then
         VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
         VENDOR_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_ARCHIVE}"
-        if curl -fsSL -L "$VENDOR_URL" -o "$VENDOR_ARCHIVE" 2>/dev/null; then
+        if github_curl -fsSL -L "$VENDOR_URL" -o "$VENDOR_ARCHIVE" 2>/dev/null; then
             # Verify vendor archive checksum (included in checksums.sha256 since CI signs it)
             if [[ -f checksums.sha256 ]] && grep -q "$VENDOR_ARCHIVE" checksums.sha256; then
                 EXPECTED_VENDOR=$(grep "$VENDOR_ARCHIVE" checksums.sha256 | awk '{print $1}')
@@ -839,7 +849,7 @@ download_and_install() {
             if command -v cosign &>/dev/null; then
                 VENDOR_BUNDLE="${VENDOR_ARCHIVE}.cosign.bundle"
                 VENDOR_BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_BUNDLE}"
-                if curl -fsSL -L "$VENDOR_BUNDLE_URL" -o "$VENDOR_BUNDLE" 2>/dev/null; then
+                if github_curl -fsSL -L "$VENDOR_BUNDLE_URL" -o "$VENDOR_BUNDLE" 2>/dev/null; then
                     if cosign verify-blob \
                         --bundle "$VENDOR_BUNDLE" \
                         --certificate-identity-regexp "https://github.com/sthenos-security/" \
