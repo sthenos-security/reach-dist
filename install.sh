@@ -30,7 +30,8 @@ set -euo pipefail
 
 INSTALLER_START_PWD="${PWD:-$(pwd -P 2>/dev/null || pwd)}"
 REACHABLE_TMP_ROOT="$HOME/.reachable/tmp"
-PUBLIC_INSTALL_URL="https://sthenosec.com/download/install.sh"
+PUBLIC_INSTALL_URL="${PUBLIC_INSTALL_URL:-https://sthenosec.com/download/install.sh}"
+LATEST_MANIFEST_URL="${LATEST_MANIFEST_URL:-https://sthenosec.com/download/latest.json}"
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -47,11 +48,36 @@ github_curl() {
     fi
 }
 
-# Resolve latest version from reach-dist GitHub releases API.
-# Uses GITHUB_TOKEN or MCP_GITHUB_TOKEN if set (avoids rate limits in CI and
-# local agent-driven environments).
-# Unauthenticated limit: 60 req/hr per IP. Authenticated: 5000 req/hr.
+resolve_version_from_manifest() {
+    local response
+    response=$(curl -fsSL "$LATEST_MANIFEST_URL" 2>/dev/null || true)
+    if [[ -z "$response" ]]; then
+        return 1
+    fi
+
+    echo "$response" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if not isinstance(data, dict) or not data.get('ok'):
+    sys.exit(1)
+version = str(data.get('version', '')).strip()
+if not version:
+    sys.exit(1)
+print(version)
+"
+}
+
+# Resolve latest version from the first-party download manifest, then fall back
+# to the reach-dist GitHub releases API only if that manifest is unavailable.
+# Uses GITHUB_TOKEN or MCP_GITHUB_TOKEN on the GitHub fallback path.
 resolve_version() {
+    local manifest_version
+    manifest_version=$(resolve_version_from_manifest || true)
+    if [[ -n "$manifest_version" ]]; then
+        printf '%s\n' "$manifest_version"
+        return 0
+    fi
+
     local api_url="https://api.github.com/repos/${REPO}/releases"
     local response
 

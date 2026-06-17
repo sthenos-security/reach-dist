@@ -1,0 +1,24 @@
+name: Installer Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Syntax check installer
+        run: bash -n install.sh
+
+      - name: Resolve local manifest smoke
+        run: bash ./test-install-manifest.sh
