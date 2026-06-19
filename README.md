@@ -215,7 +215,8 @@ For CI remediation demos, run `reachctl scan . --ci`, generate a bundle with
 `reachctl remediate --workspace . --agent opencode --all`, pass
 `.reachable/remediation-bundle/prompt.md` to the selected coding-agent action,
 then rescan the `reachable-remediate-<run-id>` branch and require
-`reachctl audit --latest --summary` plus `reachctl integrity --latest` to pass.
+`reachctl audit --scan-path "$REACHABLE_PROOF_SCAN_DIR" --summary` plus
+`reachctl integrity --scan-path "$REACHABLE_PROOF_SCAN_DIR"` to pass.
 Set agent/provider secrets such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `OPENROUTER_API_KEY`, `GITHUB_TOKEN`, and `MCP_GITHUB_TOKEN` as needed.
 

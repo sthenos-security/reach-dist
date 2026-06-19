@@ -30,8 +30,18 @@ set -euo pipefail
 
 INSTALLER_START_PWD="${PWD:-$(pwd -P 2>/dev/null || pwd)}"
 REACHABLE_TMP_ROOT="$HOME/.reachable/tmp"
+REACHABLE_INSTALL_LOG_DIR="${REACHABLE_INSTALL_LOG_DIR:-$HOME/.reachable/logs/install}"
 PUBLIC_INSTALL_URL="${PUBLIC_INSTALL_URL:-https://sthenosec.com/download/install.sh}"
 LATEST_MANIFEST_URL="${LATEST_MANIFEST_URL:-https://sthenosec.com/download/latest.json}"
+REACHABLE_DOWNLOAD_RETRIES="${REACHABLE_DOWNLOAD_RETRIES:-3}"
+REACHABLE_DOWNLOAD_RETRY_DELAY="${REACHABLE_DOWNLOAD_RETRY_DELAY:-5}"
+REACHABLE_DOWNLOAD_CONNECT_TIMEOUT="${REACHABLE_DOWNLOAD_CONNECT_TIMEOUT:-20}"
+REACHABLE_DOWNLOAD_MAX_TIME="${REACHABLE_DOWNLOAD_MAX_TIME:-600}"
+REACHABLE_PIP_ATTEMPTS="${REACHABLE_PIP_ATTEMPTS:-3}"
+REACHABLE_PIP_RETRIES="${REACHABLE_PIP_RETRIES:-5}"
+REACHABLE_PIP_TIMEOUT="${REACHABLE_PIP_TIMEOUT:-120}"
+REACHABLE_PIP_PROGRESS_BAR="${REACHABLE_PIP_PROGRESS_BAR:-on}"
+INSTALL_LOG=""
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -45,6 +55,62 @@ github_curl() {
             | curl --config - "$@"
     else
         curl "$@"
+    fi
+}
+
+download_with_retries() {
+    local label="$1"
+    local url="$2"
+    local output="$3"
+    shift 3
+    local partial="${output}.part.$$"
+
+    local curl_retry_all_errors=()
+    if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
+        curl_retry_all_errors=(--retry-all-errors)
+    fi
+
+    print_info "$label"
+    print_info "Timeout: ${REACHABLE_DOWNLOAD_MAX_TIME}s; retries: ${REACHABLE_DOWNLOAD_RETRIES}"
+    rm -f "$partial"
+
+    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
+        printf 'header = "Authorization: Bearer %s"\n' "${RELEASES_API_TOKEN}" \
+            | curl --config - \
+                --fail \
+                --location \
+                --silent \
+                --show-error \
+                --write-out "  downloaded %{size_download} bytes in %{time_total}s\n" \
+                --connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT" \
+                --max-time "$REACHABLE_DOWNLOAD_MAX_TIME" \
+                --retry "$REACHABLE_DOWNLOAD_RETRIES" \
+                --retry-delay "$REACHABLE_DOWNLOAD_RETRY_DELAY" \
+                --retry-connrefused \
+                "${curl_retry_all_errors[@]}" \
+                "$@" \
+                -o "$partial" \
+                "$url" \
+            && mv "$partial" "$output" \
+            || { rm -f "$partial"; return 1; }
+    else
+        curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            --write-out "  downloaded %{size_download} bytes in %{time_total}s\n" \
+            --connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT" \
+            --max-time "$REACHABLE_DOWNLOAD_MAX_TIME" \
+            --retry "$REACHABLE_DOWNLOAD_RETRIES" \
+            --retry-delay "$REACHABLE_DOWNLOAD_RETRY_DELAY" \
+            --retry-connrefused \
+            "${curl_retry_all_errors[@]}" \
+            "$@" \
+            -o "$partial" \
+            "$url" \
+            && mv "$partial" "$output" \
+            || { rm -f "$partial"; return 1; }
     fi
 }
 
@@ -385,6 +451,96 @@ print_info() {
     echo -e "  ${DIM}$1${NC}"
 }
 
+setup_install_log() {
+    mkdir -p "$REACHABLE_INSTALL_LOG_DIR"
+    if [[ -z "${INSTALL_LOG:-}" ]]; then
+        local stamp
+        stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+        INSTALL_LOG="$REACHABLE_INSTALL_LOG_DIR/install-${stamp}-$$.log"
+    fi
+    touch "$INSTALL_LOG"
+    chmod 600 "$INSTALL_LOG" 2>/dev/null || true
+    exec > >(tee -a "$INSTALL_LOG") 2>&1
+    print_info "Install log: $INSTALL_LOG"
+}
+
+configure_venv_pip_config() {
+    local venv_dir="$HOME/.reachable/venv"
+    mkdir -p "$venv_dir"
+    cat > "$venv_dir/pip.conf" <<EOF
+[global]
+timeout = ${REACHABLE_PIP_TIMEOUT}
+retries = ${REACHABLE_PIP_RETRIES}
+disable-pip-version-check = true
+progress-bar = ${REACHABLE_PIP_PROGRESS_BAR}
+EOF
+    print_info "Pip config: $venv_dir/pip.conf"
+}
+
+managed_reachable_version() {
+    local venv_python="$HOME/.reachable/venv/bin/python"
+    if [[ ! -x "$venv_python" ]]; then
+        return 1
+    fi
+    "$venv_python" - <<'PY' 2>/dev/null
+from importlib import metadata
+try:
+    print(metadata.version("reachable"))
+except metadata.PackageNotFoundError:
+    raise SystemExit(1)
+PY
+}
+
+uninstall_managed_reachable() {
+    local venv_python="$HOME/.reachable/venv/bin/python"
+    if [[ ! -x "$venv_python" ]]; then
+        return 0
+    fi
+    "$venv_python" -u -m pip uninstall reachable -y
+}
+
+run_pip_with_retries() {
+    local label="$1"
+    local max_attempts="$2"
+    shift 2
+
+    mkdir -p "$REACHABLE_TMP_ROOT"
+
+    local attempt
+    local rc=0
+    local attempt_log
+    attempt_log="$(mktemp "$REACHABLE_TMP_ROOT/pip-install.XXXXXX")"
+
+    for attempt in $(seq 1 "$max_attempts"); do
+        if [[ "$max_attempts" -gt 1 ]]; then
+            print_info "$label (attempt $attempt/$max_attempts)"
+        else
+            print_info "$label"
+        fi
+
+        : > "$attempt_log"
+        set +e
+        PYTHONUNBUFFERED=1 \
+            PIP_CONFIG_FILE="$HOME/.reachable/venv/pip.conf" \
+            "$@" 2>&1 | tee "$attempt_log"
+        rc=${PIPESTATUS[0]}
+        set -e
+
+        if [[ $rc -eq 0 ]]; then
+            return 0
+        fi
+
+        if [[ "$attempt" -lt "$max_attempts" ]]; then
+            print_warn "$label failed with exit $rc; retrying in ${REACHABLE_DOWNLOAD_RETRY_DELAY} seconds"
+            sleep "$REACHABLE_DOWNLOAD_RETRY_DELAY"
+        fi
+    done
+
+    print_error "$label failed after $max_attempts attempts (exit $rc)"
+    tail -30 "$attempt_log" | sed 's/^/    /'
+    return "$rc"
+}
+
 PATH_CONFIG_TARGET=""
 PATH_CONFIG_STATUS="unchanged"
 
@@ -538,8 +694,7 @@ handle_existing_install() {
     INSTALLED_VERSION=""
     BACKUP_DIR=""
     
-    if pip3 show reachable &> /dev/null; then
-        INSTALLED_VERSION=$(pip3 show reachable | grep "^Version:" | awk '{print $2}')
+    if INSTALLED_VERSION="$(managed_reachable_version)"; then
         print_step "Existing installation detected"
         print_info "Installed version: $INSTALLED_VERSION"
         print_info "Target version:    $WHEEL_VERSION"
@@ -612,17 +767,19 @@ download_and_install() {
         
         print_info "File: $LOCAL_WHEEL"
         
-        # Uninstall previous version
-        if pip3 show reachable &> /dev/null; then
+        # Uninstall previous managed version
+        if managed_reachable_version &> /dev/null; then
             print_step "Removing previous installation"
-            pip3 uninstall reachable -y -q 2>/dev/null || true
+            uninstall_managed_reachable || true
             print_ok "Previous version removed"
         fi
         
         # Install into venv
         print_step "Installing REACHABLE"
         python3 -m venv "$HOME/.reachable/venv"
-        "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
+        configure_venv_pip_config
+        run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
+            "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
 
         # Install vendor wheels if present (pre-compiled C extensions).
         # These are C packages (ruamel.yaml.clib, psutil, yara-python) built in CI
@@ -648,25 +805,23 @@ download_and_install() {
         # alone won't install them.  Install ALL vendor wheels explicitly first.
         if [[ "$HAS_VENDOR" == true ]]; then
             # F-009b: vendor wheel install failure is meaningful — do not swallow (CWE-755)
-            if ! "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl -q 2>&1; then
-                print_warn "Some vendor wheels failed to install — main install may still succeed"
+            if ! run_pip_with_retries "Installing vendor wheels" "$REACHABLE_PIP_ATTEMPTS" \
+                "$HOME/.reachable/venv/bin/python" -u -m pip install \
+                    --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl; then
+                print_error "Vendor wheel install failed — aborting"
+                exit 1
             fi
         fi
 
         # Install the main wheel.  --find-links lets pip resolve any remaining
         # dependencies; --only-binary for each vendor package prevents fallback
         # to source builds when no compiler is present.
-        set +e
         # shellcheck disable=SC2086,SC2046 -- intentional word-splitting for optional pip flags
-        PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install \
+        if ! run_pip_with_retries "Installing REACHABLE wheel dependencies" "$REACHABLE_PIP_ATTEMPTS" \
+            "$HOME/.reachable/venv/bin/python" -u -m pip install \
             $VENDOR_FIND_LINKS \
             $(_vendor_only_binary_flags "$WHEEL_DIR/vendor") \
-            "$LOCAL_WHEEL" 2>&1)
-        PIP_RC=$?
-        set -e
-        if [[ $PIP_RC -ne 0 ]]; then
-            print_error "pip install failed (exit $PIP_RC)"
-            echo "$PIP_OUTPUT" | tail -30
+            "$LOCAL_WHEEL"; then
             if [[ "$HAS_VENDOR" == true ]]; then
                 echo ""
                 print_error "Vendor wheels were pre-installed but pip still failed."
@@ -708,7 +863,7 @@ download_and_install() {
     print_info "File:       $WHEEL_FILE"
     
     WHEEL_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${WHEEL_FILE}"
-    if ! github_curl -fsSL -L "$WHEEL_URL" -o "$WHEEL_FILE"; then
+    if ! download_with_retries "Downloading REACHABLE wheel" "$WHEEL_URL" "$WHEEL_FILE"; then
         print_error "Download failed"
         echo ""
         echo "  URL: $WHEEL_URL"
@@ -725,7 +880,7 @@ download_and_install() {
     # ── SHA-256 checksum verification (F-005: fail-closed) ─────────────────
     print_step "Verifying integrity"
     CHECKSUM_URL="https://github.com/${REPO}/releases/download/v${VERSION}/checksums.sha256"
-    if ! github_curl -fsSL -L "$CHECKSUM_URL" -o checksums.sha256 2>/dev/null; then
+    if ! download_with_retries "Downloading release checksums" "$CHECKSUM_URL" checksums.sha256; then
         print_error "Could not fetch checksums.sha256 — aborting (supply chain risk)"
         print_info "URL: $CHECKSUM_URL"
         print_info "This file MUST exist for every release. If missing, the release may be compromised."
@@ -770,7 +925,7 @@ download_and_install() {
             COSIGN_URL="https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${COSIGN_ARCH}"
             local cosign_tmp
             cosign_tmp=$(mktemp "$REACHABLE_TMP_ROOT/cosign.XXXXXX")
-            if ! curl -fsSL --max-time 30 "$COSIGN_URL" -o "$cosign_tmp" 2>/dev/null; then
+            if ! download_with_retries "Downloading cosign" "$COSIGN_URL" "$cosign_tmp"; then
                 print_error "Failed to download cosign — aborting"
                 print_info "URL: $COSIGN_URL"
                 print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
@@ -795,7 +950,7 @@ download_and_install() {
     # ── Cosign signature verification (F-005: fail-closed) ────────────────────
     COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
     BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${COSIGN_BUNDLE}"
-    if ! github_curl -fsSL -L "$BUNDLE_URL" -o "$COSIGN_BUNDLE" 2>/dev/null; then
+    if ! download_with_retries "Downloading cosign bundle" "$BUNDLE_URL" "$COSIGN_BUNDLE"; then
         print_error "Could not fetch cosign bundle — aborting (supply chain risk)"
         print_info "URL: $BUNDLE_URL"
         print_info "Every release MUST include a cosign signature bundle."
@@ -812,10 +967,10 @@ download_and_install() {
     fi
     print_ok "Cosign signature verified (Sigstore)"
 
-    # Uninstall previous version
-    if pip3 show reachable &> /dev/null; then
+    # Uninstall previous managed version
+    if managed_reachable_version &> /dev/null; then
         print_step "Removing previous installation"
-        pip3 uninstall reachable -y -q 2>/dev/null || true
+        uninstall_managed_reachable || true
         print_ok "Previous version removed"
     fi
 
@@ -828,24 +983,27 @@ download_and_install() {
         fi
         exit 1
     fi
-    "$HOME/.reachable/venv/bin/pip" install --upgrade pip -q
+    configure_venv_pip_config
+    run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
+        "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
 
     # Download hash-pinned constraints (blocks supply chain attacks on dependencies)
     CONSTRAINTS_URL="https://github.com/${REPO}/releases/download/v${VERSION}/constraints.txt"
     CONSTRAINTS_FLAG=""
     CONSTRAINTS_MODE="none"
-    if github_curl -fsSL -L "$CONSTRAINTS_URL" -o constraints.txt 2>/dev/null; then
-        if grep -q "\-\-hash=" constraints.txt 2>/dev/null; then
-            CONSTRAINTS_MODE="hash"
-            print_ok "Dependency constraints verified (hash-pinned)"
-        else
-            CONSTRAINTS_MODE="version"
-            CONSTRAINTS_FLAG="--constraint constraints.txt"
-            print_ok "Dependency constraints loaded (version-pinned)"
-        fi
-    else
-        print_warn "No constraints.txt found — dependencies resolved from PyPI (unpinned)"
+    if ! download_with_retries "Downloading dependency constraints" "$CONSTRAINTS_URL" constraints.txt; then
+        print_error "Could not fetch constraints.txt — aborting (supply chain risk)"
+        print_info "URL: $CONSTRAINTS_URL"
+        print_info "Every release MUST include hash-pinned dependency constraints."
+        exit 1
     fi
+    if ! grep -q "\-\-hash=" constraints.txt 2>/dev/null; then
+        print_error "constraints.txt is not hash-pinned — aborting (supply chain risk)"
+        print_info "Every dependency entry MUST include --hash."
+        exit 1
+    fi
+    CONSTRAINTS_MODE="hash"
+    print_ok "Dependency constraints verified (hash-pinned)"
 
     # Download pre-compiled vendor wheels (C extensions: psutil, ruamel.yaml.clib)
     # Built and signed in CI — no PyPI contact, no compiler needed on customer machine.
@@ -854,39 +1012,40 @@ download_and_install() {
     if [[ "$OS" == "linux" ]]; then
         VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
         VENDOR_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_ARCHIVE}"
-        if github_curl -fsSL -L "$VENDOR_URL" -o "$VENDOR_ARCHIVE" 2>/dev/null; then
+        if download_with_retries "Downloading vendor wheels" "$VENDOR_URL" "$VENDOR_ARCHIVE"; then
             # Verify vendor archive checksum (included in checksums.sha256 since CI signs it)
-            if [[ -f checksums.sha256 ]] && grep -q "$VENDOR_ARCHIVE" checksums.sha256; then
-                EXPECTED_VENDOR=$(grep "$VENDOR_ARCHIVE" checksums.sha256 | awk '{print $1}')
-                if command -v sha256sum &>/dev/null; then
-                    ACTUAL_VENDOR=$(sha256sum "$VENDOR_ARCHIVE" | awk '{print $1}')
-                else
-                    ACTUAL_VENDOR=$(shasum -a 256 "$VENDOR_ARCHIVE" | awk '{print $1}')
-                fi
-                if [[ "$EXPECTED_VENDOR" == "$ACTUAL_VENDOR" ]]; then
-                    print_ok "Vendor archive checksum verified"
-                else
-                    print_error "Vendor archive checksum FAILED — aborting"
-                    exit 1
-                fi
+            if ! grep -q "$VENDOR_ARCHIVE" checksums.sha256; then
+                print_error "No checksum entry for $VENDOR_ARCHIVE — aborting (supply chain risk)"
+                exit 1
+            fi
+            EXPECTED_VENDOR=$(grep "$VENDOR_ARCHIVE" checksums.sha256 | awk '{print $1}')
+            if command -v sha256sum &>/dev/null; then
+                ACTUAL_VENDOR=$(sha256sum "$VENDOR_ARCHIVE" | awk '{print $1}')
+            else
+                ACTUAL_VENDOR=$(shasum -a 256 "$VENDOR_ARCHIVE" | awk '{print $1}')
+            fi
+            if [[ "$EXPECTED_VENDOR" == "$ACTUAL_VENDOR" ]]; then
+                print_ok "Vendor archive checksum verified"
+            else
+                print_error "Vendor archive checksum FAILED — aborting"
+                exit 1
             fi
 
-            # Verify vendor archive cosign signature (if cosign available)
-            if command -v cosign &>/dev/null; then
-                VENDOR_BUNDLE="${VENDOR_ARCHIVE}.cosign.bundle"
-                VENDOR_BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_BUNDLE}"
-                if github_curl -fsSL -L "$VENDOR_BUNDLE_URL" -o "$VENDOR_BUNDLE" 2>/dev/null; then
-                    if cosign verify-blob \
-                        --bundle "$VENDOR_BUNDLE" \
-                        --certificate-identity-regexp "https://github.com/sthenos-security/" \
-                        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-                        "$VENDOR_ARCHIVE" &>/dev/null; then
-                        print_ok "Vendor archive signature verified (Sigstore)"
-                    else
-                        print_error "Vendor archive signature FAILED — aborting"
-                        exit 1
-                    fi
-                fi
+            VENDOR_BUNDLE="${VENDOR_ARCHIVE}.cosign.bundle"
+            VENDOR_BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_BUNDLE}"
+            if ! download_with_retries "Downloading vendor signature" "$VENDOR_BUNDLE_URL" "$VENDOR_BUNDLE"; then
+                print_error "Could not fetch vendor cosign bundle — aborting (supply chain risk)"
+                exit 1
+            fi
+            if cosign verify-blob \
+                --bundle "$VENDOR_BUNDLE" \
+                --certificate-identity-regexp "https://github.com/sthenos-security/" \
+                --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+                "$VENDOR_ARCHIVE" &>/dev/null; then
+                print_ok "Vendor archive signature verified (Sigstore)"
+            else
+                print_error "Vendor archive signature FAILED — aborting"
+                exit 1
             fi
 
             mkdir -p vendor/
@@ -908,8 +1067,11 @@ download_and_install() {
     # Install ALL vendor wheels explicitly first, then install the main wheel.
     if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
         # F-009b: vendor wheel install failure is meaningful — do not swallow (CWE-755)
-        if ! "$HOME/.reachable/venv/bin/pip" install --no-deps --force-reinstall vendor/*.whl -q 2>&1; then
-            print_warn "Some vendor wheels failed to install — main install may still succeed"
+        if ! run_pip_with_retries "Installing vendor wheels" "$REACHABLE_PIP_ATTEMPTS" \
+            "$HOME/.reachable/venv/bin/python" -u -m pip install \
+                --no-deps --force-reinstall vendor/*.whl; then
+            print_error "Vendor wheel install failed — aborting"
+            exit 1
         fi
     fi
 
@@ -919,13 +1081,8 @@ download_and_install() {
     # --no-deps. This keeps dependency artifact hashes enforced without making
     # pip demand a second hash line for the local wheel path.
     if [[ "$CONSTRAINTS_MODE" == "hash" ]]; then
-        set +e
-        DEPS_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install --require-hashes -r constraints.txt 2>&1)
-        DEPS_RC=$?
-        set -e
-        if [[ $DEPS_RC -ne 0 ]]; then
-            print_error "dependency install failed under hash constraints (exit $DEPS_RC)"
-            echo "$DEPS_OUTPUT" | tail -30
+        if ! run_pip_with_retries "Installing hash-pinned dependencies" "$REACHABLE_PIP_ATTEMPTS" \
+            "$HOME/.reachable/venv/bin/python" -u -m pip install --require-hashes -r constraints.txt; then
             exit 1
         fi
         print_ok "Dependency install verified from hash-pinned constraints"
@@ -939,17 +1096,12 @@ download_and_install() {
     if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
         VENDOR_FIND_LINKS_REMOTE="--find-links vendor/"
     fi
-    set +e
     # shellcheck disable=SC2086,SC2046 -- intentional word-splitting for optional pip flags
-    PIP_OUTPUT=$("$HOME/.reachable/venv/bin/pip" install \
+    if ! run_pip_with_retries "Installing REACHABLE wheel" "$REACHABLE_PIP_ATTEMPTS" \
+        "$HOME/.reachable/venv/bin/python" -u -m pip install \
         $VENDOR_FIND_LINKS_REMOTE \
         $(_vendor_only_binary_flags vendor/) \
-        $CONSTRAINTS_FLAG "$WHEEL_FILE" 2>&1)
-    PIP_RC=$?
-    set -e
-    if [[ $PIP_RC -ne 0 ]]; then
-        print_error "pip install failed (exit $PIP_RC)"
-        echo "$PIP_OUTPUT" | tail -30
+        $CONSTRAINTS_FLAG "$WHEEL_FILE"; then
         if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
             echo ""
             print_error "Vendor wheels were pre-installed but pip still failed."
@@ -1001,16 +1153,12 @@ verify_installation() {
     print_header "Verification"
     
     VENV_REACHCTL="$HOME/.reachable/venv/bin/reachctl"
-    DOCTOR_LOG="$(mktemp -t reachable-doctor.XXXXXX)"
 
     echo ""
     echo -e "${BOLD}Doctor:${NC}"
-    if "$VENV_REACHCTL" doctor --full >"$DOCTOR_LOG" 2>&1; then
-        sed 's/^/  /' "$DOCTOR_LOG"
-        rm -f "$DOCTOR_LOG"
-    else
-        sed 's/^/  /' "$DOCTOR_LOG"
-        rm -f "$DOCTOR_LOG"
+    print_info "Installing required scanners and downloading the latest vulnerability database."
+    print_info "Estimated time: 1-5 minutes on a normal connection; timeout: 10 minutes."
+    if ! "$VENV_REACHCTL" doctor --full 2>&1 | sed 's/^/  /'; then
         print_error "Verification failed: reachctl doctor --full did not complete successfully"
         exit 1
     fi
@@ -1202,4 +1350,12 @@ main() {
     print_success
 }
 
-main "$@"
+if [[ "${REACHABLE_INSTALLER_SOURCE_ONLY:-}" != "1" ]]; then
+    setup_install_log
+
+    if [[ "${REACHABLE_INSTALLER_VERIFY_ONLY:-}" == "1" ]]; then
+        verify_installation
+    else
+        main "$@"
+    fi
+fi
