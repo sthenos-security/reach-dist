@@ -195,6 +195,28 @@ curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --update
 
 Use `--clean` when upgrading from a beta release to avoid database compatibility issues. Other installer options: `--version <ver>` to pin a specific version, `--wheel <path>` for local installs, `--list` to see available releases.
 
+### Candidate bundle testing
+
+Candidate and alpha installers can be tested without resolving production
+`latest.json` by pointing the installer at an explicit signed artifact source:
+
+```bash
+# Local candidate artifact directory
+REACHABLE_DIST_ROOT=/path/to/reachable-candidate-dist ./install.sh --clean
+
+# Candidate artifact directory served over HTTP(S)
+curl -fsSL https://sthenosec.com/download/install.sh \
+  | REACHABLE_DIST_BASE_URL=https://example.test/reachable-candidate-dist bash -s -- --clean
+```
+
+Use `--version <ver>` when the candidate directory does not include
+`latest.json`. The candidate artifact source must contain the selected
+`reachable-<version>-<python-tag>-<python-tag>-<platform>.whl`,
+`checksums.sha256`, the wheel `.cosign.bundle`, and hash-pinned
+`constraints.txt`. Linux candidate bundles may also include
+`vendor-<python-tag>-<platform>.tar.gz` plus its `.cosign.bundle`; if present,
+the installer verifies both checksum and signature before use.
+
 ---
 
 ## CI/CD

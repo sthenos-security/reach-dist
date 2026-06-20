@@ -41,6 +41,8 @@ REACHABLE_PIP_ATTEMPTS="${REACHABLE_PIP_ATTEMPTS:-3}"
 REACHABLE_PIP_RETRIES="${REACHABLE_PIP_RETRIES:-5}"
 REACHABLE_PIP_TIMEOUT="${REACHABLE_PIP_TIMEOUT:-120}"
 REACHABLE_PIP_PROGRESS_BAR="${REACHABLE_PIP_PROGRESS_BAR:-on}"
+REACHABLE_DIST_ROOT="${REACHABLE_DIST_ROOT:-}"
+REACHABLE_DIST_BASE_URL="${REACHABLE_DIST_BASE_URL:-}"
 INSTALL_LOG=""
 
 # -----------------------------------------------------------------------------
@@ -131,6 +133,46 @@ if not version:
     sys.exit(1)
 print(version)
 "
+}
+
+_manifest_version_from_json() {
+    python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+if not isinstance(data, dict) or not data.get('ok'):
+    sys.exit(1)
+version = str(data.get('version', '')).strip()
+if not version:
+    sys.exit(1)
+print(version)
+"
+}
+
+candidate_dist_source_enabled() {
+    [[ -n "${REACHABLE_DIST_ROOT:-}" || -n "${REACHABLE_DIST_BASE_URL:-}" ]]
+}
+
+resolve_version_from_candidate_dist() {
+    if [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
+        local manifest="${REACHABLE_DIST_ROOT%/}/latest.json"
+        if [[ -f "$manifest" ]]; then
+            _manifest_version_from_json < "$manifest"
+            return 0
+        fi
+        return 1
+    fi
+
+    if [[ -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
+        local response
+        response=$(curl -fsSL "${REACHABLE_DIST_BASE_URL%/}/latest.json" 2>/dev/null || true)
+        if [[ -z "$response" ]]; then
+            return 1
+        fi
+        echo "$response" | _manifest_version_from_json
+        return 0
+    fi
+
+    return 1
 }
 
 # Resolve latest version from the first-party download manifest, then fall back
@@ -241,6 +283,40 @@ if len(data) > 10:
     echo ""
 }
 
+dist_artifact_source() {
+    local name="$1"
+    if [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
+        printf '%s/%s\n' "${REACHABLE_DIST_ROOT%/}" "$name"
+    elif [[ -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
+        printf '%s/%s\n' "${REACHABLE_DIST_BASE_URL%/}" "$name"
+    else
+        printf 'https://github.com/%s/releases/download/v%s/%s\n' "$REPO" "$VERSION" "$name"
+    fi
+}
+
+download_dist_artifact() {
+    local label="$1"
+    local name="$2"
+    local output="$3"
+    local source
+    source="$(dist_artifact_source "$name")"
+
+    if [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
+        local partial="${output}.part.$$"
+        print_info "$label"
+        print_info "Source: $source"
+        rm -f "$partial"
+        if [[ ! -f "$source" ]]; then
+            return 1
+        fi
+        cp "$source" "$partial" && mv "$partial" "$output" \
+            || { rm -f "$partial"; return 1; }
+        return 0
+    fi
+
+    download_with_retries "$label" "$source" "$output"
+}
+
 VERSION=""
 WHEEL_VERSION=""
 
@@ -265,6 +341,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --version|-v)
             CUSTOM_VERSION="$2"
+            shift 2
+            ;;
+        --dist-root)
+            REACHABLE_DIST_ROOT="$2"
+            shift 2
+            ;;
+        --dist-base-url)
+            REACHABLE_DIST_BASE_URL="$2"
             shift 2
             ;;
         --clean)
@@ -304,6 +388,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --clean            Remove existing data before install"
             echo "  --version, -v VER  Install specific version (e.g., 1.0.0b35)"
             echo "  --wheel, -w FILE   Install from local wheel file (skips download)"
+            echo "  --dist-root DIR    Install from a local signed dist artifact directory"
+            echo "  --dist-base-url URL"
+            echo "                     Install from a signed dist artifact base URL"
             echo "  --vibe-coding      Run bundled reach-vibe setup after install"
             echo "  --vibe             Alias for --vibe-coding"
             echo "  --agent NAME       Restrict reach-vibe wiring to a specific agent"
@@ -321,6 +408,8 @@ while [[ $# -gt 0 ]]; do
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --version 1.0.0b35"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --agent codex"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --no-baseline"
+            echo "  REACHABLE_DIST_ROOT=/tmp/reachable-candidate ./install.sh --clean"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | REACHABLE_DIST_BASE_URL=https://example.test/reachable-candidate bash -s -- --clean"
             echo ""
             echo "Local checkout only (run from the reach-dist repo root):"
             echo "  ./install.sh --wheel ./file.whl"
@@ -340,6 +429,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -n "${REACHABLE_DIST_ROOT:-}" && -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
+    echo "Error: use either REACHABLE_DIST_ROOT/--dist-root or REACHABLE_DIST_BASE_URL/--dist-base-url, not both"
+    exit 1
+fi
+
+if [[ -n "${LOCAL_WHEEL:-}" ]] && candidate_dist_source_enabled; then
+    echo "Error: --wheel cannot be combined with candidate dist source options"
+    exit 1
+fi
+
 # Apply custom version or resolve latest
 # --wheel mode doesn't need a version (extracted from wheel filename)
 if [[ -n "$LOCAL_WHEEL" ]]; then
@@ -349,7 +448,15 @@ elif [[ -n "$CUSTOM_VERSION" ]]; then
     VERSION="$CUSTOM_VERSION"
     WHEEL_VERSION="$VERSION"
 else
-    VERSION=$(resolve_version)
+    if candidate_dist_source_enabled; then
+        VERSION=$(resolve_version_from_candidate_dist || true)
+        if [[ -z "$VERSION" ]]; then
+            echo "Error: candidate dist source requires --version or latest.json in the candidate artifact directory"
+            exit 1
+        fi
+    else
+        VERSION=$(resolve_version)
+    fi
     if [[ -z "$VERSION" ]]; then
         echo "Error: could not resolve latest version from ${REPO}"
         exit 1
@@ -851,22 +958,27 @@ download_and_install() {
         return
     fi
     
-    # Remote install - download from GitHub
+    # Remote/candidate install - download signed artifacts
     print_step "Downloading wheel"
     
     mkdir -p "$REACHABLE_TMP_ROOT"
     DOWNLOAD_DIR=$(mktemp -d "$REACHABLE_TMP_ROOT/install.XXXXXX")
     cd "$DOWNLOAD_DIR"
     
-    print_info "Repository: github.com/$REPO"
-    print_info "Release:    v$VERSION"
+    if [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
+        print_info "Candidate dist root: $REACHABLE_DIST_ROOT"
+    elif [[ -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
+        print_info "Candidate dist base URL: ${REACHABLE_DIST_BASE_URL%/}"
+    else
+        print_info "Repository: github.com/$REPO"
+        print_info "Release:    v$VERSION"
+    fi
     print_info "File:       $WHEEL_FILE"
     
-    WHEEL_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${WHEEL_FILE}"
-    if ! download_with_retries "Downloading REACHABLE wheel" "$WHEEL_URL" "$WHEEL_FILE"; then
+    if ! download_dist_artifact "Downloading REACHABLE wheel" "$WHEEL_FILE" "$WHEEL_FILE"; then
         print_error "Download failed"
         echo ""
-        echo "  URL: $WHEEL_URL"
+        echo "  Source: $(dist_artifact_source "$WHEEL_FILE")"
         echo "  Possible causes:"
         echo "    • Version v$VERSION not yet available"
         echo "    • Wheel for Python $PY_VERSION / $PLATFORM_TAG not available"
@@ -879,20 +991,19 @@ download_and_install() {
 
     # ── SHA-256 checksum verification (F-005: fail-closed) ─────────────────
     print_step "Verifying integrity"
-    CHECKSUM_URL="https://github.com/${REPO}/releases/download/v${VERSION}/checksums.sha256"
-    if ! download_with_retries "Downloading release checksums" "$CHECKSUM_URL" checksums.sha256; then
+    if ! download_dist_artifact "Downloading release checksums" checksums.sha256 checksums.sha256; then
         print_error "Could not fetch checksums.sha256 — aborting (supply chain risk)"
-        print_info "URL: $CHECKSUM_URL"
+        print_info "Source: $(dist_artifact_source checksums.sha256)"
         print_info "This file MUST exist for every release. If missing, the release may be compromised."
         exit 1
     fi
-    if ! grep -q "$WHEEL_FILE" checksums.sha256; then
+    if ! grep -Fq "$WHEEL_FILE" checksums.sha256; then
         print_error "No checksum entry for $WHEEL_FILE — aborting (supply chain risk)"
         print_info "The checksums.sha256 file exists but does not contain an entry for this wheel."
         print_info "This means the wheel was not built by CI or was tampered with after signing."
         exit 1
     fi
-    EXPECTED=$(grep "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
+    EXPECTED=$(grep -F "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
     if command -v sha256sum &>/dev/null; then
         ACTUAL=$(sha256sum "$WHEEL_FILE" | awk '{print $1}')
     else
@@ -949,10 +1060,9 @@ download_and_install() {
 
     # ── Cosign signature verification (F-005: fail-closed) ────────────────────
     COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
-    BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${COSIGN_BUNDLE}"
-    if ! download_with_retries "Downloading cosign bundle" "$BUNDLE_URL" "$COSIGN_BUNDLE"; then
+    if ! download_dist_artifact "Downloading cosign bundle" "$COSIGN_BUNDLE" "$COSIGN_BUNDLE"; then
         print_error "Could not fetch cosign bundle — aborting (supply chain risk)"
-        print_info "URL: $BUNDLE_URL"
+        print_info "Source: $(dist_artifact_source "$COSIGN_BUNDLE")"
         print_info "Every release MUST include a cosign signature bundle."
         exit 1
     fi
@@ -988,12 +1098,11 @@ download_and_install() {
         "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
 
     # Download hash-pinned constraints (blocks supply chain attacks on dependencies)
-    CONSTRAINTS_URL="https://github.com/${REPO}/releases/download/v${VERSION}/constraints.txt"
     CONSTRAINTS_FLAG=""
     CONSTRAINTS_MODE="none"
-    if ! download_with_retries "Downloading dependency constraints" "$CONSTRAINTS_URL" constraints.txt; then
+    if ! download_dist_artifact "Downloading dependency constraints" constraints.txt constraints.txt; then
         print_error "Could not fetch constraints.txt — aborting (supply chain risk)"
-        print_info "URL: $CONSTRAINTS_URL"
+        print_info "Source: $(dist_artifact_source constraints.txt)"
         print_info "Every release MUST include hash-pinned dependency constraints."
         exit 1
     fi
@@ -1011,14 +1120,13 @@ download_and_install() {
     HAS_VENDOR_REMOTE=false
     if [[ "$OS" == "linux" ]]; then
         VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
-        VENDOR_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_ARCHIVE}"
-        if download_with_retries "Downloading vendor wheels" "$VENDOR_URL" "$VENDOR_ARCHIVE"; then
+        if download_dist_artifact "Downloading vendor wheels" "$VENDOR_ARCHIVE" "$VENDOR_ARCHIVE"; then
             # Verify vendor archive checksum (included in checksums.sha256 since CI signs it)
-            if ! grep -q "$VENDOR_ARCHIVE" checksums.sha256; then
+            if ! grep -Fq "$VENDOR_ARCHIVE" checksums.sha256; then
                 print_error "No checksum entry for $VENDOR_ARCHIVE — aborting (supply chain risk)"
                 exit 1
             fi
-            EXPECTED_VENDOR=$(grep "$VENDOR_ARCHIVE" checksums.sha256 | awk '{print $1}')
+            EXPECTED_VENDOR=$(grep -F "$VENDOR_ARCHIVE" checksums.sha256 | awk '{print $1}')
             if command -v sha256sum &>/dev/null; then
                 ACTUAL_VENDOR=$(sha256sum "$VENDOR_ARCHIVE" | awk '{print $1}')
             else
@@ -1032,9 +1140,9 @@ download_and_install() {
             fi
 
             VENDOR_BUNDLE="${VENDOR_ARCHIVE}.cosign.bundle"
-            VENDOR_BUNDLE_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${VENDOR_BUNDLE}"
-            if ! download_with_retries "Downloading vendor signature" "$VENDOR_BUNDLE_URL" "$VENDOR_BUNDLE"; then
+            if ! download_dist_artifact "Downloading vendor signature" "$VENDOR_BUNDLE" "$VENDOR_BUNDLE"; then
                 print_error "Could not fetch vendor cosign bundle — aborting (supply chain risk)"
+                print_info "Source: $(dist_artifact_source "$VENDOR_BUNDLE")"
                 exit 1
             fi
             if cosign verify-blob \
