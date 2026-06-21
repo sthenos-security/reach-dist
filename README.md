@@ -33,8 +33,8 @@ That path:
 - bootstraps external tools automatically
 - runs bundled `reach-vibe` setup
 - starts the local daemon
-- runs the initial baseline scan and builds the DB-backed skill/rule bundle
 - wires supported local coding agents in the current repo
+- does not start a baseline scan unless you pass `--baseline`
 
 If you are testing locally from the `reach-dist` checkout:
 
@@ -46,13 +46,15 @@ Useful public installer variants:
 
 ```bash
 curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent codex
-curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent cursor --no-baseline
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent cursor
 curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --repo /path/to/repo
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --baseline
 ```
 
-Use `--no-baseline` when you want to wire the daemon, agents, and MCP endpoint
-without running the install-time baseline scan. The older
-`--no-auto-vibe`/`--skip-vibe-baseline` aliases still work.
+Use `--baseline` only when you want install to run the first baseline scan and
+build the initial DB-backed skill/rule bundle. The `--no-baseline`,
+`--no-auto-vibe`, and `--skip-vibe-baseline` aliases still work as
+compatibility no-ops because scan startup is now explicit.
 
 After install:
 
@@ -66,12 +68,12 @@ reachctl remediate --repo /path/to/repo --agent codex --all
 ps -ef | grep '[r]each_agent _daemon'  # low-level daemon check
 ```
 
-The baseline scan and skill synthesis do not modify product source code. They
-write scanner truth into `repo.db`, update `.reachable/ai-rules/`, and refresh
-agent guidance. Those rules are used on the next hook/MCP/agent event or by an
-explicit `reachctl vibe remediate` run. For reviewable code changes, pass
-`--branch-name`; the installer does not silently create a branch or rewrite the
-repo.
+If explicitly requested, the baseline scan and skill synthesis do not modify
+product source code. They write scanner truth into `repo.db`, update
+`.reachable/ai-rules/`, and refresh agent guidance. Those rules are used on
+the next hook/MCP/agent event or by an explicit `reachctl vibe remediate` run.
+For reviewable code changes, pass `--branch-name`; the installer does not
+silently create a branch or rewrite the repo.
 
 For CI or desktop agent orchestration, `reachctl remediate` writes
 `.reachable/remediation-bundle/prompt.md`, `bundle.json`, `ai-rules/`, and

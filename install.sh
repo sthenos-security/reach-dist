@@ -329,7 +329,7 @@ CLEAN_DATA=false
 LOCAL_WHEEL=""
 ENABLE_VIBE_CODING=false
 VIBE_WORKSPACE=""
-VIBE_SKIP_BASELINE=false
+VIBE_RUN_BASELINE=false
 VIBE_AGENTS=()
 VIBE_UI_URL=""
 
@@ -372,9 +372,14 @@ while [[ $# -gt 0 ]]; do
             VIBE_WORKSPACE="$2"
             shift 2
             ;;
+        --baseline|--baseline-scan)
+            ENABLE_VIBE_CODING=true
+            VIBE_RUN_BASELINE=true
+            shift
+            ;;
         --no-auto-vibe|--skip-vibe-baseline|--no-baseline)
             ENABLE_VIBE_CODING=true
-            VIBE_SKIP_BASELINE=true
+            VIBE_RUN_BASELINE=false
             shift
             ;;
         --help|-h)
@@ -395,7 +400,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --vibe             Alias for --vibe-coding"
             echo "  --agent NAME       Restrict reach-vibe wiring to a specific agent"
             echo "  --repo DIR         Repo root for reach-vibe setup (defaults to current repo)"
-            echo "  --no-baseline      Skip the initial reach-vibe baseline scan"
+            echo "  --baseline         Run the initial reach-vibe baseline scan"
+            echo "  --no-baseline      Compatibility no-op; baseline scans are opt-in"
             echo "  --no-auto-vibe     Alias for --no-baseline"
             echo "  --list, -l         List available releases"
             echo "  --help, -h         Show this help"
@@ -407,7 +413,7 @@ while [[ $# -gt 0 ]]; do
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --clean   # Clean install"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --version 1.0.0b35"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --agent codex"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --no-baseline"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --baseline"
             echo "  REACHABLE_DIST_ROOT=/tmp/reachable-candidate ./install.sh --clean"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | REACHABLE_DIST_BASE_URL=https://example.test/reachable-candidate bash -s -- --clean"
             echo ""
@@ -1350,8 +1356,8 @@ run_vibe_setup() {
             vibe_cmd+=(--agent "$agent_name")
         done
     fi
-    if [[ "$VIBE_SKIP_BASELINE" == true ]]; then
-        vibe_cmd+=(--no-auto-vibe)
+    if [[ "$VIBE_RUN_BASELINE" == true ]]; then
+        vibe_cmd+=(--baseline-scan)
     fi
 
     if "${vibe_cmd[@]}"; then
