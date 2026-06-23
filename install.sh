@@ -40,7 +40,9 @@ REACHABLE_DOWNLOAD_MAX_TIME="${REACHABLE_DOWNLOAD_MAX_TIME:-600}"
 REACHABLE_PIP_ATTEMPTS="${REACHABLE_PIP_ATTEMPTS:-3}"
 REACHABLE_PIP_RETRIES="${REACHABLE_PIP_RETRIES:-5}"
 REACHABLE_PIP_TIMEOUT="${REACHABLE_PIP_TIMEOUT:-120}"
-REACHABLE_PIP_PROGRESS_BAR="${REACHABLE_PIP_PROGRESS_BAR:-on}"
+REACHABLE_PIP_PROGRESS_BAR="${REACHABLE_PIP_PROGRESS_BAR:-off}"
+REACHABLE_PIP_VERBOSE="${REACHABLE_PIP_VERBOSE:-0}"
+REACHABLE_INSTALL_PROGRESS_INTERVAL="${REACHABLE_INSTALL_PROGRESS_INTERVAL:-30}"
 REACHABLE_DIST_ROOT="${REACHABLE_DIST_ROOT:-}"
 REACHABLE_DIST_BASE_URL="${REACHABLE_DIST_BASE_URL:-}"
 INSTALL_LOG=""
@@ -542,26 +544,45 @@ print_header() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}  $1${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    log_event "HEADER $1"
 }
 
 print_step() {
     echo -e "\n${CYAN}▶${NC} ${BOLD}$1${NC}"
+    log_event "STEP $1"
 }
 
 print_ok() {
     echo -e "  ${GREEN}✓${NC} $1"
+    log_event "OK $1"
 }
 
 print_warn() {
     echo -e "  ${YELLOW}⚠${NC} $1"
+    log_event "WARN $1"
 }
 
 print_error() {
     echo -e "  ${RED}✗${NC} $1"
+    log_event "ERROR $1"
 }
 
 print_info() {
     echo -e "  ${DIM}$1${NC}"
+}
+
+timestamp_utc() {
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+epoch_seconds() {
+    date +%s
+}
+
+log_event() {
+    if [[ -n "${INSTALL_LOG:-}" ]]; then
+        printf '[%s] %s\n' "$(timestamp_utc)" "$*" >> "$INSTALL_LOG"
+    fi
 }
 
 setup_install_log() {
@@ -633,11 +654,47 @@ run_pip_with_retries() {
 
         : > "$attempt_log"
         set +e
-        PYTHONUNBUFFERED=1 \
-            PIP_CONFIG_FILE="$HOME/.reachable/venv/pip.conf" \
-            "$@" 2>&1 | tee "$attempt_log"
-        rc=${PIPESTATUS[0]}
+        local started_at
+        local elapsed
+        started_at="$(epoch_seconds)"
+        log_event "PIP start label=\"$label\" attempt=$attempt/$max_attempts"
+        if [[ "$REACHABLE_PIP_VERBOSE" == "1" ]]; then
+            PYTHONUNBUFFERED=1 \
+                PIP_CONFIG_FILE="$HOME/.reachable/venv/pip.conf" \
+                "$@" 2>&1 | tee "$attempt_log"
+            rc=${PIPESTATUS[0]}
+        else
+            local pip_pid
+            local now
+            local next_progress
+            next_progress=$((started_at + REACHABLE_INSTALL_PROGRESS_INTERVAL))
+            PYTHONUNBUFFERED=1 \
+                PIP_CONFIG_FILE="$HOME/.reachable/venv/pip.conf" \
+                "$@" > "$attempt_log" 2>&1 &
+            pip_pid=$!
+            while jobs -pr | grep -qx "$pip_pid"; do
+                sleep 1
+                now="$(epoch_seconds)"
+                if [[ "$REACHABLE_INSTALL_PROGRESS_INTERVAL" -gt 0 && "$now" -ge "$next_progress" ]]; then
+                    elapsed=$((now - started_at))
+                    print_info "$label still running (${elapsed}s elapsed; log: $INSTALL_LOG)"
+                    log_event "PIP progress label=\"$label\" attempt=$attempt/$max_attempts elapsed=${elapsed}s"
+                    next_progress=$((now + REACHABLE_INSTALL_PROGRESS_INTERVAL))
+                fi
+            done
+            wait "$pip_pid"
+            rc=$?
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                {
+                    echo ""
+                    echo "=== pip output: $label attempt $attempt/$max_attempts rc=$rc ==="
+                    cat "$attempt_log"
+                } >> "$INSTALL_LOG"
+            fi
+        fi
         set -e
+        elapsed=$(($(epoch_seconds) - started_at))
+        log_event "PIP end label=\"$label\" attempt=$attempt/$max_attempts rc=$rc elapsed=${elapsed}s"
 
         if [[ $rc -eq 0 ]]; then
             return 0
@@ -1382,6 +1439,8 @@ print_success() {
     local upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update"
     local doctor_hint="reachctl doctor          # Add AI and GitHub tokens"
     local path_hint=""
+    local summary_mode="${REACHABLE_INSTALLER_SUMMARY:-auto}"
+    local compact_success=false
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
         upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update --vibe"
     fi
@@ -1396,6 +1455,15 @@ print_success() {
             path_hint="~/.reachable/venv/bin is available to the installer runtime."
             ;;
     esac
+    if [[ "$summary_mode" == "compact" ]]; then
+        compact_success=true
+    elif [[ "$summary_mode" == "auto" ]]; then
+        if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+            compact_success=true
+        elif [[ "$ENABLE_VIBE_CODING" == true ]] && ((${#VIBE_AGENTS[@]} > 0)); then
+            compact_success=true
+        fi
+    fi
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1408,6 +1476,22 @@ print_success() {
     fi
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
+    if [[ "$compact_success" == true ]]; then
+        if [[ -n "$VIBE_UI_URL" ]]; then
+            echo "  Dashboard: $VIBE_UI_URL"
+        fi
+        echo "  $path_hint"
+        if [[ -n "${INSTALL_LOG:-}" ]]; then
+            echo "  Install log: $INSTALL_LOG"
+        fi
+        if [[ "$ENABLE_VIBE_CODING" == true ]]; then
+            echo "  Next: run reachable: doctor in the agent, or reachctl vibe status in a shell."
+        else
+            echo "  Next: run reachctl doctor, then reachctl scan /path/to/repo."
+        fi
+        echo ""
+        return
+    fi
     echo -e "  ${BOLD}Start Here:${NC}"
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
         if [[ -n "$VIBE_UI_URL" ]]; then
