@@ -42,10 +42,16 @@ REACHABLE_PIP_RETRIES="${REACHABLE_PIP_RETRIES:-5}"
 REACHABLE_PIP_TIMEOUT="${REACHABLE_PIP_TIMEOUT:-120}"
 REACHABLE_PIP_PROGRESS_BAR="${REACHABLE_PIP_PROGRESS_BAR:-off}"
 REACHABLE_PIP_VERBOSE="${REACHABLE_PIP_VERBOSE:-0}"
-REACHABLE_INSTALL_PROGRESS_INTERVAL="${REACHABLE_INSTALL_PROGRESS_INTERVAL:-30}"
+REACHABLE_INSTALLER_AGENT_SETUP="${REACHABLE_INSTALLER_AGENT_SETUP:-0}"
+if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+    REACHABLE_INSTALL_PROGRESS_INTERVAL="${REACHABLE_INSTALL_PROGRESS_INTERVAL:-60}"
+else
+    REACHABLE_INSTALL_PROGRESS_INTERVAL="${REACHABLE_INSTALL_PROGRESS_INTERVAL:-30}"
+fi
 REACHABLE_DIST_ROOT="${REACHABLE_DIST_ROOT:-}"
 REACHABLE_DIST_BASE_URL="${REACHABLE_DIST_BASE_URL:-}"
 INSTALL_LOG=""
+SKIP_RUNTIME_INSTALL=false
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -116,6 +122,39 @@ download_with_retries() {
             && mv "$partial" "$output" \
             || { rm -f "$partial"; return 1; }
     fi
+}
+
+resolve_python_bin() {
+    local candidate
+    local candidates=()
+    if [[ -n "${PYTHON:-}" ]]; then
+        candidates+=("$PYTHON")
+    fi
+    candidates+=(python3.14 python3.13 python3.12 python3.11 python3)
+
+    for candidate in "${candidates[@]}"; do
+        if ! command -v "$candidate" >/dev/null 2>&1; then
+            continue
+        fi
+        local path
+        path="$(command -v "$candidate")"
+        if [[ ! -x "$path" ]]; then
+            continue
+        fi
+        local version
+        version="$("$path" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)"
+        if [[ -z "$version" ]]; then
+            continue
+        fi
+        local major minor
+        major="$(echo "$version" | cut -d. -f1)"
+        minor="$(echo "$version" | cut -d. -f2)"
+        if [[ "$major" -gt 3 || ( "$major" -eq 3 && "$minor" -ge 11 ) ]]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+    done
+    return 1
 }
 
 resolve_version_from_manifest() {
@@ -637,6 +676,15 @@ run_pip_with_retries() {
     local label="$1"
     local max_attempts="$2"
     shift 2
+    local display_label="$label"
+    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+        case "$label" in
+            "Upgrading pip in managed venv") display_label="Preparing Python environment" ;;
+            "Installing hash-pinned dependencies") display_label="Installing runtime dependencies" ;;
+            "Installing vendor wheels") display_label="Installing platform wheels" ;;
+            "Installing REACHABLE wheel") display_label="Installing reachable" ;;
+        esac
+    fi
 
     mkdir -p "$REACHABLE_TMP_ROOT"
 
@@ -647,9 +695,9 @@ run_pip_with_retries() {
 
     for attempt in $(seq 1 "$max_attempts"); do
         if [[ "$max_attempts" -gt 1 ]]; then
-            print_info "$label (attempt $attempt/$max_attempts)"
+            print_info "$display_label (attempt $attempt/$max_attempts)"
         else
-            print_info "$label"
+            print_info "$display_label"
         fi
 
         : > "$attempt_log"
@@ -677,7 +725,7 @@ run_pip_with_retries() {
                 now="$(epoch_seconds)"
                 if [[ "$REACHABLE_INSTALL_PROGRESS_INTERVAL" -gt 0 && "$now" -ge "$next_progress" ]]; then
                     elapsed=$((now - started_at))
-                    print_info "$label still running (${elapsed}s elapsed; log: $INSTALL_LOG)"
+                    print_info "$display_label still running (${elapsed}s elapsed; log: $INSTALL_LOG)"
                     log_event "PIP progress label=\"$label\" attempt=$attempt/$max_attempts elapsed=${elapsed}s"
                     next_progress=$((now + REACHABLE_INSTALL_PROGRESS_INTERVAL))
                 fi
@@ -701,12 +749,12 @@ run_pip_with_retries() {
         fi
 
         if [[ "$attempt" -lt "$max_attempts" ]]; then
-            print_warn "$label failed with exit $rc; retrying in ${REACHABLE_DOWNLOAD_RETRY_DELAY} seconds"
+            print_warn "$display_label failed with exit $rc; retrying in ${REACHABLE_DOWNLOAD_RETRY_DELAY} seconds"
             sleep "$REACHABLE_DOWNLOAD_RETRY_DELAY"
         fi
     done
 
-    print_error "$label failed after $max_attempts attempts (exit $rc)"
+    print_error "$display_label failed after $max_attempts attempts (exit $rc)"
     tail -30 "$attempt_log" | sed 's/^/    /'
     return "$rc"
 }
@@ -784,14 +832,15 @@ detect_environment() {
         *)       print_error "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
     
-    # Python version
-    if ! command -v python3 &> /dev/null; then
-        print_error "Python 3 not found"
+    # Python version. Prefer an explicit PYTHON=... override, then modern
+    # python3.x binaries, because macOS can leave /usr/bin/python3 on 3.9.
+    if ! PY_BIN="$(resolve_python_bin)"; then
+        print_error "Python 3.11+ not found"
         exit 1
     fi
     
     # Check python3-venv is available (common missing package on Debian/Ubuntu ARM64)
-    if ! python3 -c "import venv" 2>/dev/null; then
+    if ! "$PY_BIN" -c "import venv" 2>/dev/null; then
         print_error "python3-venv not available"
         if [[ "$OS" == "linux" ]]; then
             echo ""
@@ -804,11 +853,10 @@ detect_environment() {
         exit 1
     fi
     
-    PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    PY_VERSION=$("$PY_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
     PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
-    PY_BIN="$(command -v python3)"
-    PY_ARCH="$(python3 -c "import platform; print(platform.machine())" 2>/dev/null || echo unknown)"
+    PY_ARCH="$("$PY_BIN" -c "import platform; print(platform.machine())" 2>/dev/null || echo unknown)"
     
     if [[ "$PY_MAJOR" -lt 3 ]] || [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ]]; then
         print_error "Python 3.11+ required (found $PY_VERSION)"
@@ -870,6 +918,16 @@ handle_existing_install() {
         print_info "Target version:    $WHEEL_VERSION"
         
         if [[ "$UPDATE_MODE" == true ]]; then
+            if [[ "$INSTALLED_VERSION" == "$WHEEL_VERSION" && -x "$HOME/.reachable/venv/bin/reachctl" && "$CLEAN_DATA" != true ]]; then
+                SKIP_RUNTIME_INSTALL=true
+                if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+                    print_ok "reachable runtime is already current; verifying setup"
+                else
+                    print_ok "REACHABLE runtime is already current; verifying setup"
+                fi
+                return
+            fi
+
             # Backup existing data
             if [[ -d "$HOME/.reachable" ]]; then
                 BACKUP_DIR="$HOME/.reachable.backup.$(date +%Y%m%d-%H%M%S)"
@@ -926,6 +984,10 @@ handle_existing_install() {
 # Download & Install
 # -----------------------------------------------------------------------------
 download_and_install() {
+    if [[ "$SKIP_RUNTIME_INSTALL" == true ]]; then
+        return
+    fi
+
     # If local wheel provided, use it directly
     if [[ -n "$LOCAL_WHEEL" ]]; then
         print_step "Installing from local wheel"
@@ -945,8 +1007,8 @@ download_and_install() {
         fi
         
         # Install into venv
-        print_step "Installing REACHABLE"
-        python3 -m venv "$HOME/.reachable/venv"
+        print_step "Installing reachable"
+        "$PY_BIN" -m venv "$HOME/.reachable/venv"
         configure_venv_pip_config
         run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
             "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
@@ -1148,8 +1210,12 @@ download_and_install() {
     fi
 
     # Install into venv
-    print_step "Installing REACHABLE v$VERSION"
-    if ! python3 -m venv "$HOME/.reachable/venv" 2>&1; then
+    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+        print_step "Installing reachable v$VERSION"
+    else
+        print_step "Installing REACHABLE v$VERSION"
+    fi
+    if ! "$PY_BIN" -m venv "$HOME/.reachable/venv" 2>&1; then
         print_error "Failed to create virtual environment"
         if [[ "$OS" == "linux" ]]; then
             echo "  Try: sudo apt install python3-venv python3-dev"
@@ -1324,27 +1390,87 @@ verify_installation() {
     print_header "Verification"
     
     VENV_REACHCTL="$HOME/.reachable/venv/bin/reachctl"
+    mkdir -p "$REACHABLE_TMP_ROOT"
 
     echo ""
     echo -e "${BOLD}Doctor:${NC}"
     print_info "Installing required scanners and downloading the latest vulnerability database."
     print_info "Estimated time: 1-5 minutes on a normal connection; timeout: 10 minutes."
-    if ! "$VENV_REACHCTL" doctor --full 2>&1 | sed 's/^/  /'; then
-        print_error "Verification failed: reachctl doctor --full did not complete successfully"
-        exit 1
+    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+        local doctor_log
+        doctor_log="$(mktemp "$REACHABLE_TMP_ROOT/doctor.XXXXXX")"
+        print_info "Doctor started"
+        if "$VENV_REACHCTL" doctor --full > "$doctor_log" 2>&1; then
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                {
+                    echo ""
+                    echo "=== doctor output ==="
+                    cat "$doctor_log"
+                } >> "$INSTALL_LOG"
+            fi
+            print_ok "Doctor passed"
+        else
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                {
+                    echo ""
+                    echo "=== doctor output ==="
+                    cat "$doctor_log"
+                } >> "$INSTALL_LOG"
+            fi
+            print_error "Verification failed: doctor did not complete successfully (see $INSTALL_LOG)"
+            rm -f "$doctor_log"
+            exit 1
+        fi
+        rm -f "$doctor_log"
+    else
+        if ! "$VENV_REACHCTL" doctor --full 2>&1 | sed 's/^/  /'; then
+            print_error "Verification failed: reachctl doctor --full did not complete successfully"
+            exit 1
+        fi
     fi
 
     echo ""
     echo -e "${BOLD}Self-test:${NC}"
-    if "$VENV_REACHCTL" selftest 2>&1 | sed 's/^/  /'; then
-        print_ok "All checks passed"
+    print_info "Selftest started"
+    if [[ "${REACHABLE_INSTALLER_VERBOSE_SELFTEST:-0}" == "1" ]]; then
+        if "$VENV_REACHCTL" selftest 2>&1 | sed 's/^/  /'; then
+            print_ok "Selftest passed"
+        else
+            print_warn "Selftest failed (non-fatal)"
+        fi
     else
-        print_warn "Some tests failed (non-fatal)"
+        selftest_log="$(mktemp "$REACHABLE_TMP_ROOT/selftest.XXXXXX")"
+        if "$VENV_REACHCTL" selftest --quiet > "$selftest_log" 2>&1; then
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                {
+                    echo ""
+                    echo "=== selftest output ==="
+                    cat "$selftest_log"
+                } >> "$INSTALL_LOG"
+            fi
+            print_ok "Selftest passed"
+        else
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                {
+                    echo ""
+                    echo "=== selftest output ==="
+                    cat "$selftest_log"
+                } >> "$INSTALL_LOG"
+            fi
+            print_warn "Selftest failed (non-fatal; see $INSTALL_LOG)"
+        fi
+        rm -f "$selftest_log"
     fi
 
     echo ""
     echo -e "${BOLD}Version:${NC}"
-    "$VENV_REACHCTL" version 2>&1 | sed 's/^/  /'
+    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+        local version_line
+        version_line="$("$VENV_REACHCTL" --version 2>/dev/null | sed -n '1p' || "$VENV_REACHCTL" version 2>/dev/null | sed -n '1p' || true)"
+        print_info "$version_line"
+    else
+        "$VENV_REACHCTL" version 2>&1 | sed 's/^/  /'
+    fi
 }
 
 resolve_vibe_workspace() {
@@ -1417,7 +1543,38 @@ run_vibe_setup() {
         vibe_cmd+=(--baseline-scan)
     fi
 
-    if "${vibe_cmd[@]}"; then
+    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+        local vibe_log
+        vibe_log="$(mktemp "$REACHABLE_TMP_ROOT/vibe-install.XXXXXX")"
+        print_info "Workspace wiring started"
+        if "${vibe_cmd[@]}" > "$vibe_log" 2>&1; then
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                {
+                    echo ""
+                    echo "=== reach-vibe setup output ==="
+                    cat "$vibe_log"
+                } >> "$INSTALL_LOG"
+            fi
+            print_ok "Workspace wired"
+            local ui_output
+            ui_output="$("$reachctl_bin" vibe ui --repo "$workspace" --no-open 2>/dev/null || true)"
+            VIBE_UI_URL="$(printf '%s\n' "$ui_output" | awk '/^https?:\/\// { url = $0 } END { print url }')"
+            if [[ -n "$VIBE_UI_URL" ]]; then
+                print_info "Dashboard: $VIBE_UI_URL"
+            fi
+        else
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                {
+                    echo ""
+                    echo "=== reach-vibe setup output ==="
+                    cat "$vibe_log"
+                } >> "$INSTALL_LOG"
+            fi
+            print_warn "reach-vibe setup failed, but reachable itself is installed (see $INSTALL_LOG)"
+            print_info "Retry later with: ${vibe_cmd[*]}"
+        fi
+        rm -f "$vibe_log"
+    elif "${vibe_cmd[@]}"; then
         print_ok "reach-vibe installed for $workspace"
         local ui_output
         ui_output="$("$reachctl_bin" vibe ui --repo "$workspace" --no-open 2>/dev/null || true)"
@@ -1467,7 +1624,15 @@ print_success() {
 
     echo ""
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    if [[ "$UPDATE_MODE" == true ]]; then
+    if [[ "$compact_success" == true ]]; then
+        if [[ "$UPDATE_MODE" == true ]]; then
+            echo -e "${GREEN}  ✓ reachable upgraded successfully${NC}"
+        elif [[ "$CLEAN_DATA" == true ]]; then
+            echo -e "${GREEN}  ✓ reachable installed successfully (clean install)${NC}"
+        else
+            echo -e "${GREEN}  ✓ reachable installed successfully${NC}"
+        fi
+    elif [[ "$UPDATE_MODE" == true ]]; then
         echo -e "${GREEN}  ✓ REACHABLE upgraded successfully!${NC}"
     elif [[ "$CLEAN_DATA" == true ]]; then
         echo -e "${GREEN}  ✓ REACHABLE installed successfully! (clean install)${NC}"
@@ -1485,7 +1650,7 @@ print_success() {
             echo "  Install log: $INSTALL_LOG"
         fi
         if [[ "$ENABLE_VIBE_CODING" == true ]]; then
-            echo "  Next: run reachable: doctor in the agent, or reachctl vibe status in a shell."
+            echo "  Next: run reachable: doctor in the agent."
         else
             echo "  Next: run reachctl doctor, then reachctl scan /path/to/repo."
         fi
@@ -1530,7 +1695,13 @@ print_success() {
 # Main
 # -----------------------------------------------------------------------------
 main() {
-    if [[ -n "$LOCAL_WHEEL" ]]; then
+    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" && "$UPDATE_MODE" == true ]]; then
+        print_header "reachable upgrade v${VERSION}"
+    elif [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" && "$CLEAN_DATA" == true ]]; then
+        print_header "reachable clean install v${VERSION}"
+    elif [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+        print_header "reachable installer v${VERSION}"
+    elif [[ -n "$LOCAL_WHEEL" ]]; then
         print_header "REACHABLE Local Install"
     elif [[ "$UPDATE_MODE" == true ]]; then
         print_header "REACHABLE Upgrade v${VERSION}"
