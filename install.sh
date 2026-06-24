@@ -917,17 +917,17 @@ handle_existing_install() {
         print_info "Installed version: $INSTALLED_VERSION"
         print_info "Target version:    $WHEEL_VERSION"
         
-        if [[ "$UPDATE_MODE" == true ]]; then
-            if [[ "$INSTALLED_VERSION" == "$WHEEL_VERSION" && -x "$HOME/.reachable/venv/bin/reachctl" && "$CLEAN_DATA" != true ]]; then
-                SKIP_RUNTIME_INSTALL=true
-                if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
-                    print_ok "reachable runtime is already current; verifying setup"
-                else
-                    print_ok "REACHABLE runtime is already current; verifying setup"
-                fi
-                return
+        if [[ "$INSTALLED_VERSION" == "$WHEEL_VERSION" && -x "$HOME/.reachable/venv/bin/reachctl" && "$CLEAN_DATA" != true ]]; then
+            SKIP_RUNTIME_INSTALL=true
+            if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+                print_ok "reachable runtime is already current; verifying setup"
+            else
+                print_ok "REACHABLE runtime is already current; verifying setup"
             fi
+            return
+        fi
 
+        if [[ "$UPDATE_MODE" == true ]]; then
             # Backup existing data
             if [[ -d "$HOME/.reachable" ]]; then
                 BACKUP_DIR="$HOME/.reachable.backup.$(date +%Y%m%d-%H%M%S)"
