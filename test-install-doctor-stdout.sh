@@ -52,6 +52,10 @@ case "$1" in
         echo "   latest vulnerability database downloaded"
         ;;
     selftest)
+        if [[ "${2:-}" != "--quiet" ]]; then
+            echo "unexpected selftest args: $*" >&2
+            exit 2
+        fi
         echo "selftest ok"
         ;;
     version)
@@ -80,7 +84,9 @@ SH
     assert_contains "$STDOUT_LOG" "REACHABLE SYSTEM CHECK"
     assert_contains "$STDOUT_LOG" "Downloading latest vulnerability database (first install; estimated 1-5 minutes, timeout 10 minutes)..."
     assert_contains "$STDOUT_LOG" "Self-test:"
-    assert_contains "$STDOUT_LOG" "selftest ok"
+    assert_contains "$STDOUT_LOG" "Selftest started"
+    assert_contains "$STDOUT_LOG" "Selftest passed"
+    assert_not_contains "$STDOUT_LOG" "selftest ok"
     assert_contains "$STDOUT_LOG" "Version:"
     assert_contains "$STDOUT_LOG" "REACHABLE test-version"
     assert_not_contains "$STDOUT_LOG" "reachable-doctor"
@@ -106,6 +112,8 @@ SH
     assert_contains "$INSTALL_LOG" "REACHABLE SYSTEM CHECK"
     assert_contains "$INSTALL_LOG" "Downloading latest vulnerability database (first install; estimated 1-5 minutes, timeout 10 minutes)..."
     assert_contains "$INSTALL_LOG" "Self-test:"
+    assert_contains "$INSTALL_LOG" "=== selftest output ==="
+    assert_contains "$INSTALL_LOG" "selftest ok"
     assert_contains "$INSTALL_LOG" "Version:"
 done
 
