@@ -784,7 +784,11 @@ _shell_rc_path() {
 
 configure_shell_path() {
     local reach_path="$HOME/.reachable/venv/bin"
+    local path_line='export PATH="$HOME/.reachable/venv/bin:$PATH"'
+    local marker_line="# Added by REACHABLE installer"
     local rc_file
+    local path_count
+    local tmp_file
 
     case ":$PATH:" in
         *":$reach_path:"*) ;;
@@ -796,15 +800,25 @@ configure_shell_path() {
     mkdir -p "$(dirname "$rc_file")"
     touch "$rc_file"
 
-    if grep -Fq "$reach_path" "$rc_file" 2>/dev/null; then
+    path_count=$({ grep -Fx "$path_line" "$rc_file" 2>/dev/null || true; } | wc -l | tr -d ' ')
+    if [[ "$path_count" == "1" ]]; then
         PATH_CONFIG_STATUS="already-configured"
         return
     fi
 
+    tmp_file=$(mktemp "${TMPDIR:-/tmp}/reachable-path.XXXXXX")
+    awk -v marker="$marker_line" -v path_line="$path_line" '
+        $0 == marker { next }
+        $0 == path_line { next }
+        { print }
+    ' "$rc_file" > "$tmp_file"
+    cat "$tmp_file" > "$rc_file"
+    rm -f "$tmp_file"
+
     {
         echo ""
-        echo "# Added by REACHABLE installer"
-        echo "export PATH=\"\$HOME/.reachable/venv/bin:\$PATH\""
+        echo "$marker_line"
+        echo "$path_line"
     } >> "$rc_file"
     PATH_CONFIG_STATUS="updated"
 }
@@ -928,26 +942,23 @@ handle_existing_install() {
         fi
 
         if [[ "$UPDATE_MODE" == true ]]; then
-            # Backup existing data
-            if [[ -d "$HOME/.reachable" ]]; then
-                BACKUP_DIR="$HOME/.reachable.backup.$(date +%Y%m%d-%H%M%S)"
-                print_step "Backing up existing data"
-                cp -r "$HOME/.reachable" "$BACKUP_DIR" 2>/dev/null || true
-                print_ok "Backup created: $BACKUP_DIR"
+            # Updates are in-place. Runtime assets such as scanner DBs, tools,
+            # and venvs are reproducible and must not be copied into timestamped
+            # backups; Grype alone is ~1.7GB.
+            print_info "Update mode: preserving data in place; no backup copy created"
 
-                # Clear AI verdict caches on upgrade — Enzo prompts and AI
-                # discovery prompts can change between versions; stale entries
-                # served by the fast-path cache lookup would mask new behavior
-                # (b76b regression: 100% cache hit served pre-dp_ctx verdicts).
-                # ai-cache.db is also auto-wiped on AI_CACHE_SCHEMA_VERSION_INT
-                # bumps inside init_schema(); this is belt-and-suspenders and
-                # additionally handles ai-discovery.json which has no
-                # schema-version mechanism. Backup above preserves originals.
-                print_step "Clearing AI verdict caches (prompts may have changed)"
-                find "$HOME/.reachable/scans" -name "ai-cache.db" -delete 2>/dev/null || true
-                find "$HOME/.reachable/scans" -name "ai-discovery.json" -delete 2>/dev/null || true
-                print_ok "AI caches cleared — next scan will rebuild fresh verdicts"
-            fi
+            # Clear AI verdict caches on upgrade — Enzo prompts and AI
+            # discovery prompts can change between versions; stale entries
+            # served by the fast-path cache lookup would mask new behavior
+            # (b76b regression: 100% cache hit served pre-dp_ctx verdicts).
+            # ai-cache.db is also auto-wiped on AI_CACHE_SCHEMA_VERSION_INT
+            # bumps inside init_schema(); this is belt-and-suspenders and
+            # additionally handles ai-discovery.json which has no
+            # schema-version mechanism.
+            print_step "Clearing AI verdict caches (prompts may have changed)"
+            find "$HOME/.reachable/scans" -name "ai-cache.db" -delete 2>/dev/null || true
+            find "$HOME/.reachable/scans" -name "ai-discovery.json" -delete 2>/dev/null || true
+            print_ok "AI caches cleared — next scan will rebuild fresh verdicts"
         elif [[ "$CLEAN_DATA" == false ]]; then
             # Fresh install mode without --clean - warn user
             echo ""

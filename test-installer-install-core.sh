@@ -27,6 +27,20 @@ assert_not_contains() {
     fi
 }
 
+assert_line_count() {
+    local file="$1"
+    local needle="$2"
+    local expected="$3"
+    local actual
+    actual=$(grep -Fx "$needle" "$file" 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$actual" != "$expected" ]]; then
+        echo "expected $expected occurrence(s) in $file: $needle; found $actual" >&2
+        echo "--- $file ---" >&2
+        sed -n '1,220p' "$file" >&2 || true
+        exit 1
+    fi
+}
+
 HOME="$WORK_DIR/home"
 mkdir -p "$HOME/.reachable/venv/bin"
 export HOME
@@ -68,11 +82,12 @@ assert_contains "$OUT" "Existing installation detected"
 assert_contains "$OUT" "Installed version: 1.0.0b112"
 assert_contains "$OUT" "Target version:    1.0.0b113"
 BACKUP_COUNT="$(find "$HOME" -maxdepth 1 -type d -name '.reachable.backup.*' | wc -l | tr -d ' ')"
-if [[ "$BACKUP_COUNT" != "1" ]]; then
-    echo "expected exactly one reachable backup, found $BACKUP_COUNT" >&2
+if [[ "$BACKUP_COUNT" != "0" ]]; then
+    echo "expected no reachable backup during update, found $BACKUP_COUNT" >&2
     find "$WORK_DIR" -maxdepth 2 -type d -print >&2
     exit 1
 fi
+assert_contains "$OUT" "Update mode: preserving data in place; no backup copy created"
 
 DOWNLOAD_SRC="$WORK_DIR/source.txt"
 DOWNLOAD_OUT="$WORK_DIR/out.txt"
@@ -86,5 +101,32 @@ if find "$WORK_DIR" -name '*.part.*' | grep -q .; then
     find "$WORK_DIR" -name '*.part.*' -print >&2
     exit 1
 fi
+
+SHELL="$WORK_DIR/bin/zsh"
+mkdir -p "$WORK_DIR/bin"
+touch "$SHELL"
+export SHELL
+RC_FILE="$HOME/.zshrc"
+PATH_LINE='export PATH="$HOME/.reachable/venv/bin:$PATH"'
+
+configure_shell_path
+configure_shell_path
+assert_line_count "$RC_FILE" "# Added by REACHABLE installer" "1"
+assert_line_count "$RC_FILE" "$PATH_LINE" "1"
+
+{
+    echo "# existing user config"
+    echo "# Added by REACHABLE installer"
+    echo "$PATH_LINE"
+    echo "# Added by REACHABLE installer"
+    echo "$PATH_LINE"
+    echo "export PATH=\"\$HOME/bin:\$PATH\""
+} > "$RC_FILE"
+
+configure_shell_path
+assert_contains "$RC_FILE" "# existing user config"
+assert_contains "$RC_FILE" 'export PATH="$HOME/bin:$PATH"'
+assert_line_count "$RC_FILE" "# Added by REACHABLE installer" "1"
+assert_line_count "$RC_FILE" "$PATH_LINE" "1"
 
 echo "installer core install/upgrade test passed"
