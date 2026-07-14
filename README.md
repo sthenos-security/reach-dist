@@ -17,7 +17,12 @@ reachctl scan /path/to/your/repo
 
 That's it. When the scan finishes, open the dashboard link printed in the terminal — or run `reachctl dashboard --open`.
 
-**Requirements:** Python 3.11+ and either Linux (x86_64/ARM64) or macOS (Apple Silicon/Intel).
+The public installer bootstrap verifies the signed release manifest, checks the
+downloaded installer SHA-256, verifies the installer with Sigstore/cosign, and
+only then runs the installer. The installer then verifies the wheel, dependency
+constraints, and signed release artifacts before installing.
+
+**Requirements:** Python 3.11+, `curl`, `python3`, `cosign`, and either Linux (x86_64/ARM64) or macOS (Apple Silicon/Intel).
 
 ### Vibe-coding quick start
 
@@ -29,7 +34,9 @@ curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe
 
 That path:
 
+- verifies the signed release manifest and installer before execution
 - installs the main `reachable` wheel
+- verifies wheel checksums, cosign bundles, and hash-pinned dependencies
 - bootstraps external tools automatically
 - runs bundled `reach-vibe` setup
 - starts the local daemon
@@ -260,7 +267,23 @@ Primer is a full interactive command reference built into the CLI. It covers eve
 
 ## Release Verification
 
-Every release is signed with [Sigstore](https://sigstore.dev) cosign and checksummed with SHA-256. The installer verifies both automatically.
+Every release is signed with [Sigstore](https://sigstore.dev) cosign and
+checksummed with SHA-256. The default `https://sthenosec.com/download/install.sh`
+path verifies release provenance automatically:
+
+1. Resolve `https://sthenosec.com/download/manifest.json`.
+2. Download and cosign-verify `reachable-release-manifest.json`.
+3. Download `install.sh`.
+4. Check `install.sh` against the SHA-256 recorded in the signed manifest.
+5. Cosign-verify `install.sh`.
+6. Run the installer only after those checks pass.
+7. Let the installer verify the wheel, constraints, vendor archive, checksums,
+   and cosign bundles before installation.
+
+The installer fails closed on missing signatures, checksum mismatches, wrong
+issuer/identity, or missing release metadata. Manual verification remains
+available for air-gapped review, but it is not required for the standard install
+path.
 
 ---
 
