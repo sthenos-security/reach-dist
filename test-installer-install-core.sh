@@ -129,4 +129,50 @@ assert_contains "$RC_FILE" 'export PATH="$HOME/bin:$PATH"'
 assert_line_count "$RC_FILE" "# Added by REACHABLE installer" "1"
 assert_line_count "$RC_FILE" "$PATH_LINE" "1"
 
+if ! selector_looks_like_version "1.0.0b139"; then
+    echo "expected beta version selector to be recognized as a version" >&2
+    exit 1
+fi
+if selector_looks_like_version "agent-plugin-alpha-20260714-26e0ede"; then
+    echo "expected alpha release tag selector to stay a tag, not a version" >&2
+    exit 1
+fi
+if [[ "$(release_tag_for_version "1.0.0b139")" != "v1.0.0b139" ]]; then
+    echo "release tag normalization failed" >&2
+    exit 1
+fi
+
+resolve_version_from_release_tag() {
+    local tag="$1"
+    if [[ "$tag" != "agent-plugin-alpha-20260714-26e0ede" ]]; then
+        echo "unexpected release tag lookup: $tag" >&2
+        exit 1
+    fi
+    printf '1.0.0b139\n'
+}
+
+CUSTOM_VERSION="agent-plugin-alpha-20260714-26e0ede"
+LOCAL_WHEEL=""
+REACHABLE_DIST_ROOT=""
+REACHABLE_DIST_BASE_URL=""
+apply_version_selection
+if [[ "$VERSION" != "1.0.0b139" ]]; then
+    echo "expected resolved alpha version 1.0.0b139, got $VERSION" >&2
+    exit 1
+fi
+if [[ "$WHEEL_VERSION" != "1.0.0b139" ]]; then
+    echo "expected resolved alpha wheel version 1.0.0b139, got $WHEEL_VERSION" >&2
+    exit 1
+fi
+if [[ "$RELEASE_TAG" != "agent-plugin-alpha-20260714-26e0ede" ]]; then
+    echo "expected alpha release tag to stay exact, got $RELEASE_TAG" >&2
+    exit 1
+fi
+EXPECTED_SOURCE="https://github.com/sthenos-security/reach-dist/releases/download/agent-plugin-alpha-20260714-26e0ede/reachable-1.0.0b139-cp314-cp314-macosx_11_0_universal2.whl"
+ACTUAL_SOURCE="$(dist_artifact_source "reachable-1.0.0b139-cp314-cp314-macosx_11_0_universal2.whl")"
+if [[ "$ACTUAL_SOURCE" != "$EXPECTED_SOURCE" ]]; then
+    echo "unexpected alpha artifact source: $ACTUAL_SOURCE" >&2
+    exit 1
+fi
+
 echo "installer core install/upgrade test passed"

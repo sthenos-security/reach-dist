@@ -331,7 +331,7 @@ dist_artifact_source() {
     elif [[ -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
         printf '%s/%s\n' "${REACHABLE_DIST_BASE_URL%/}" "$name"
     else
-        printf 'https://github.com/%s/releases/download/v%s/%s\n' "$REPO" "$VERSION" "$name"
+        printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$RELEASE_TAG" "$name"
     fi
 }
 
@@ -360,6 +360,7 @@ download_dist_artifact() {
 
 VERSION=""
 WHEEL_VERSION=""
+RELEASE_TAG=""
 
 # -----------------------------------------------------------------------------
 # Parse Arguments
@@ -486,30 +487,124 @@ if [[ -n "${LOCAL_WHEEL:-}" ]] && candidate_dist_source_enabled; then
     exit 1
 fi
 
-# Apply custom version or resolve latest
-# --wheel mode doesn't need a version (extracted from wheel filename)
-if [[ -n "$LOCAL_WHEEL" ]]; then
-    VERSION="local"
-    WHEEL_VERSION="local"
-elif [[ -n "$CUSTOM_VERSION" ]]; then
-    VERSION="$CUSTOM_VERSION"
-    WHEEL_VERSION="$VERSION"
-else
-    if candidate_dist_source_enabled; then
-        VERSION=$(resolve_version_from_candidate_dist || true)
-        if [[ -z "$VERSION" ]]; then
-            echo "Error: candidate dist source requires --version or latest.json in the candidate artifact directory"
-            exit 1
+selector_looks_like_version() {
+    local selector="${1:-}"
+    [[ "$selector" =~ ^v?[0-9]+(\.[0-9]+){2}([A-Za-z0-9._-]+)?$ ]]
+}
+
+release_tag_for_version() {
+    local version="${1#v}"
+    printf 'v%s\n' "$version"
+}
+
+resolve_version_from_release_tag() {
+    local tag="$1"
+    local encoded_tag
+    local api_url
+    local response
+
+    encoded_tag="$(python3 - "$tag" <<'PY'
+import sys
+from urllib.parse import quote
+
+print(quote(sys.argv[1], safe=""))
+PY
+)"
+    api_url="https://api.github.com/repos/${REPO}/releases/tags/${encoded_tag}"
+
+    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
+        response=$(github_curl -sL "$api_url")
+    else
+        response=$(curl -sL "$api_url")
+    fi
+
+    echo "$response" | python3 -c "
+import json
+import os
+import re
+import sys
+
+data = json.load(sys.stdin)
+if not isinstance(data, dict):
+    sys.stderr.write('Error resolving release version: unexpected GitHub API response\\n')
+    sys.exit(1)
+if data.get('message') and not data.get('tag_name'):
+    msg = str(data.get('message', 'unknown error'))
+    has_token = bool(os.environ.get('GITHUB_TOKEN', '') or os.environ.get('MCP_GITHUB_TOKEN', ''))
+    if 'rate limit' in msg.lower():
+        if has_token:
+            sys.stderr.write('Error: GitHub API rate limit exceeded even with GITHUB_TOKEN or MCP_GITHUB_TOKEN.\\n')
+            sys.stderr.write('  Your token may be invalid or scoped incorrectly.\\n')
+        else:
+            sys.stderr.write('Error: GitHub API rate limit exceeded (unauthenticated).\\n')
+            sys.stderr.write('  Fix option 1 - set a token and retry.\\n')
+            sys.stderr.write('  Fix option 2 - wait about 1 hour for the rate limit to reset, then retry.\\n')
+    else:
+        sys.stderr.write('Error resolving release version for tag ' + sys.argv[1] + ': ' + msg + '\\n')
+    sys.exit(1)
+
+assets = data.get('assets') or []
+for asset in assets:
+    name = str(asset.get('name', '')).strip()
+    match = re.match(r'^reachable-([^-]+)-.+\\.whl$', name)
+    if match:
+        print(match.group(1))
+        sys.exit(0)
+
+version = str(data.get('name', '')).strip()
+if version and re.match(r'^v?[0-9]+(\\.[0-9]+){2}([A-Za-z0-9._-]+)?$', version):
+    print(version.lstrip('v'))
+    sys.exit(0)
+
+sys.stderr.write('Error resolving release version for tag ' + sys.argv[1] + ': no reachable wheel assets found\\n')
+sys.exit(1)
+" "$tag" GITHUB_TOKEN="${GITHUB_TOKEN:-}" MCP_GITHUB_TOKEN="${MCP_GITHUB_TOKEN:-}"
+}
+
+apply_version_selection() {
+    # --wheel mode doesn't need a version (extracted from wheel filename)
+    if [[ -n "$LOCAL_WHEEL" ]]; then
+        VERSION="local"
+        WHEEL_VERSION="local"
+        RELEASE_TAG="local"
+    elif [[ -n "$CUSTOM_VERSION" ]]; then
+        if selector_looks_like_version "$CUSTOM_VERSION"; then
+            VERSION="${CUSTOM_VERSION#v}"
+            WHEEL_VERSION="$VERSION"
+            RELEASE_TAG="$(release_tag_for_version "$VERSION")"
+        else
+            RELEASE_TAG="$CUSTOM_VERSION"
+            if candidate_dist_source_enabled; then
+                VERSION=$(resolve_version_from_candidate_dist || true)
+            else
+                VERSION=$(resolve_version_from_release_tag "$RELEASE_TAG" || true)
+            fi
+            if [[ -z "$VERSION" ]]; then
+                echo "Error: could not resolve wheel version for release tag $RELEASE_TAG"
+                exit 1
+            fi
+            WHEEL_VERSION="$VERSION"
         fi
     else
-        VERSION=$(resolve_version)
+        if candidate_dist_source_enabled; then
+            VERSION=$(resolve_version_from_candidate_dist || true)
+            if [[ -z "$VERSION" ]]; then
+                echo "Error: candidate dist source requires --version or latest.json in the candidate artifact directory"
+                exit 1
+            fi
+        else
+            VERSION=$(resolve_version)
+        fi
+        if [[ -z "$VERSION" ]]; then
+            echo "Error: could not resolve latest version from ${REPO}"
+            exit 1
+        fi
+        WHEEL_VERSION="$VERSION"
+        RELEASE_TAG="$(release_tag_for_version "$VERSION")"
     fi
-    if [[ -z "$VERSION" ]]; then
-        echo "Error: could not resolve latest version from ${REPO}"
-        exit 1
-    fi
-    WHEEL_VERSION="$VERSION"
-fi
+}
+
+apply_version_selection
 
 # -----------------------------------------------------------------------------
 # Colors & Formatting
@@ -985,8 +1080,15 @@ handle_existing_install() {
     
     # Handle --clean flag
     if [[ "$CLEAN_DATA" == true ]] && [[ -d "$HOME/.reachable" ]]; then
+        local refresh_install_log=false
+        if [[ -n "${INSTALL_LOG:-}" && "$INSTALL_LOG" == "$HOME/.reachable/"* ]]; then
+            refresh_install_log=true
+        fi
         print_step "Removing existing data (--clean)"
         rm -rf "$HOME/.reachable"
+        if [[ "$refresh_install_log" == true ]]; then
+            setup_install_log
+        fi
         print_ok "Removed ~/.reachable"
     fi
 }
@@ -1107,7 +1209,7 @@ download_and_install() {
         print_info "Candidate dist base URL: ${REACHABLE_DIST_BASE_URL%/}"
     else
         print_info "Repository: github.com/$REPO"
-        print_info "Release:    v$VERSION"
+        print_info "Release:    $RELEASE_TAG"
     fi
     print_info "File:       $WHEEL_FILE"
     
@@ -1116,7 +1218,7 @@ download_and_install() {
         echo ""
         echo "  Source: $(dist_artifact_source "$WHEEL_FILE")"
         echo "  Possible causes:"
-        echo "    • Version v$VERSION not yet available"
+        echo "    • Release $RELEASE_TAG not yet available"
         echo "    • Wheel for Python $PY_VERSION / $PLATFORM_TAG not available"
         echo ""
         echo "  Contact: info@sthenosec.com"
