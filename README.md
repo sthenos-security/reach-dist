@@ -178,7 +178,7 @@ Set one API key and AI runs automatically on every scan:
 reachctl doctor set openrouter-api-key    # recommended — openrouter.ai/keys
 ```
 
-**Why OpenRouter?** One key, 300+ models, ~$0.001 per finding. REACHABLE routes each task to the best model automatically.
+**Why OpenRouter?** One key can access many supported models through one gateway. REACHABLE uses the configured, benchmark-qualified model for each AI lane; model defaults are changed only after task-specific qualification.
 
 **Other providers:** `anthropic-api-key` (Claude — highest accuracy, ~$0.003/finding), `groq-api-key` (Groq — fastest, ~$0.0004/finding), `openai-api-key` (GPT-4o — ~$0.002/finding). For fully local / air-gapped setups, REACHABLE connects to Ollama or any OpenAI-compatible endpoint — run `reachctl primer` for setup instructions.
 
