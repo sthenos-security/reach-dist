@@ -13,8 +13,12 @@
 #
 #  Usage:
 #
-#    # Standard install (no auth required)
+#    # Standard install (no auth required).  Installs the scanner AND the
+#    # continuous surface: daemon, agent hooks, MCP server, generated skills.
 #    curl -fsSL https://sthenosec.com/download/install.sh | bash
+#
+#    # Scanner only — CI runners and other ephemeral, non-interactive hosts
+#    curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --no-vibe
 #
 #    # Local wheel install
 #    ./install.sh --wheel /path/to/reachable-<version>-<platform>.whl
@@ -369,7 +373,29 @@ UPDATE_MODE=false
 CUSTOM_VERSION=""
 CLEAN_DATA=false
 LOCAL_WHEEL=""
-ENABLE_VIBE_CODING=false
+
+# REACHABLE has one install mode.  The continuous surface — daemon, agent
+# hooks, MCP registration, and generated skills/rules — is installed by
+# default, because the skills loop is the product.  CI runners and other
+# ephemeral, non-interactive hosts opt out explicitly with --no-vibe.
+#
+# ENABLE_VIBE_CODING is resolved once, after argument parsing, so the outcome
+# never depends on flag order.  The resolved surface and the reason for it are
+# always printed; there is no silent branch.
+#
+# No CI auto-detection happens here.  That decision has exactly one authority:
+# the sthenosec.com/download/install.sh bootstrap, which detects
+# GITHUB_ACTIONS / GITLAB_CI / CI, prints what it found, and forwards an
+# explicit --no-vibe or --vibe to this script.  A second detector here would
+# let a direct-download user and a bootstrap user get different answers on the
+# same machine with no way to tell which one decided.
+ENABLE_VIBE_CODING=true
+# Flag that asked for the full surface ("" if none was passed).
+VIBE_REQUESTED_FLAG=""
+# Flag that asked for the scanner only ("" if none was passed).
+NO_VIBE_REQUESTED_FLAG=""
+# Human-readable reason for the resolved surface, printed in the summary.
+VIBE_SURFACE_REASON="default"
 VIBE_WORKSPACE=""
 VIBE_RUN_BASELINE=false
 VIBE_AGENTS=()
@@ -402,11 +428,22 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --vibe-coding|--vibe)
-            ENABLE_VIBE_CODING=true
+            # Redundant with the default, but published agent plugins send it
+            # on every install and the bootstrap forwards it, so it must keep
+            # working.  It now means "wire the surface even on a host a wrapper
+            # would otherwise treat as CI".
+            VIBE_REQUESTED_FLAG="${VIBE_REQUESTED_FLAG:-$1}"
+            shift
+            ;;
+        --no-vibe|--no-vibe-coding)
+            # Scanner only: no daemon, no hooks, no MCP server, no skills.
+            # Distinct from --no-auto-vibe/--no-baseline/--skip-vibe-baseline
+            # below, which keep the surface and only suppress the baseline scan.
+            NO_VIBE_REQUESTED_FLAG="${NO_VIBE_REQUESTED_FLAG:-$1}"
             shift
             ;;
         --agent)
-            ENABLE_VIBE_CODING=true
+            VIBE_REQUESTED_FLAG="${VIBE_REQUESTED_FLAG:-$1}"
             VIBE_AGENTS+=("$2")
             shift 2
             ;;
@@ -415,12 +452,15 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --baseline|--baseline-scan)
-            ENABLE_VIBE_CODING=true
+            VIBE_REQUESTED_FLAG="${VIBE_REQUESTED_FLAG:-$1}"
             VIBE_RUN_BASELINE=true
             shift
             ;;
         --no-auto-vibe|--skip-vibe-baseline|--no-baseline)
-            ENABLE_VIBE_CODING=true
+            # Baseline-scan opt-out only. These say nothing about the surface:
+            # the plugin's generated setup.sh passes --no-baseline on every run
+            # and must keep getting the full surface, while a CI runner may pass
+            # --no-vibe --no-baseline together and must keep getting neither.
             VIBE_RUN_BASELINE=false
             shift
             ;;
@@ -430,6 +470,11 @@ while [[ $# -gt 0 ]]; do
             echo "Usage:"
             echo "  ./install.sh [OPTIONS]"
             echo ""
+            echo "REACHABLE has one install mode. Every install gets the scanner AND the"
+            echo "continuous surface: the local daemon, agent hooks, the MCP server, and"
+            echo "the generated skills/rules. The skills loop is the product, so the"
+            echo "component that delivers it is not an add-on."
+            echo ""
             echo "Options:"
             echo "  --update, -u       Upgrade existing installation (backs up data)"
             echo "  --clean            Remove existing data before install"
@@ -438,30 +483,55 @@ while [[ $# -gt 0 ]]; do
             echo "  --dist-root DIR    Install from a local signed dist artifact directory"
             echo "  --dist-base-url URL"
             echo "                     Install from a signed dist artifact base URL"
-            echo "  --vibe-coding      Run bundled reach-vibe setup after install"
-            echo "  --vibe             Alias for --vibe-coding"
-            echo "  --agent NAME       Restrict reach-vibe wiring to a specific agent"
-            echo "  --repo DIR         Repo root for reach-vibe setup (defaults to current repo)"
-            echo "  --baseline         Run the initial reach-vibe baseline scan"
-            echo "  --no-baseline      Compatibility no-op; baseline scans are opt-in"
+            echo "  --no-vibe          Install the scanner ONLY: no daemon, no agent hooks,"
+            echo "                     no MCP server, no generated skills. This exists for CI"
+            echo "                     runners and other ephemeral, non-interactive hosts: a"
+            echo "                     pipeline is single-shot, often containerised, and has"
+            echo "                     no supervisor for a filesystem-watching daemon, so"
+            echo "                     starting one there is waste at best and a hang risk at"
+            echo "                     worst. On a developer machine it removes the product"
+            echo "                     you installed REACHABLE for — do not reach for it there."
+            echo "  --no-vibe-coding   Alias for --no-vibe"
+            echo "  --vibe             Wire the continuous surface explicitly. This is already"
+            echo "                     the default; pass it to force the surface on a host that"
+            echo "                     a wrapper would otherwise treat as CI, and because every"
+            echo "                     published agent plugin sends it."
+            echo "  --vibe-coding      Alias for --vibe"
+            echo "  --agent NAME       Restrict agent wiring to a specific agent (implies --vibe)"
+            echo "  --repo DIR         Repo root to wire (defaults to the current repo)"
+            echo "  --baseline         Run the initial baseline scan (implies --vibe)"
+            echo "  --no-baseline      Skip the baseline scan; the surface is still installed."
+            echo "                     This is NOT --no-vibe. Baseline scans are opt-in already,"
+            echo "                     so this is a compatibility no-op on its own."
             echo "  --no-auto-vibe     Alias for --no-baseline"
+            echo "  --skip-vibe-baseline"
+            echo "                     Alias for --no-baseline"
             echo "  --list, -l         List available releases"
             echo "  --help, -h         Show this help"
             echo ""
+            echo "  --no-vibe cannot be combined with --vibe, --vibe-coding, --agent, or"
+            echo "  --baseline: those ask for the surface --no-vibe removes. The installer"
+            echo "  exits 2 rather than picking a winner."
+            echo ""
+            echo "  This script does not inspect the environment to decide the surface."
+            echo "  ${PUBLIC_INSTALL_URL} detects GITHUB_ACTIONS / GITLAB_CI / CI,"
+            echo "  prints what it found, and forwards --no-vibe or --vibe here explicitly."
+            echo ""
             echo "Examples:"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash                 # Fresh install (latest release)"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --list    # Show available versions"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update  # Upgrade with backup"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --clean   # Clean install"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash                  # Fresh install, full surface"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --no-vibe  # CI runner: scanner only"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --list     # Show available versions"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update   # Upgrade with backup"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --clean    # Clean install"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --version 1.0.0b35"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --agent codex"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --baseline"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --agent codex"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --baseline"
             echo "  REACHABLE_DIST_ROOT=/tmp/reachable-candidate ./install.sh --clean"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | REACHABLE_DIST_BASE_URL=https://example.test/reachable-candidate bash -s -- --clean"
             echo ""
             echo "Local checkout only (run from the reach-dist repo root):"
             echo "  ./install.sh --wheel ./file.whl"
-            echo "  ./install.sh --vibe"
+            echo "  ./install.sh --no-vibe"
             echo ""
             exit 0
             ;;
@@ -476,6 +546,30 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Resolve the install surface once, after the whole argv has been read, so the
+# result is independent of flag order. Contradictory flags abort; they are never
+# resolved in favour of one of them.
+if [[ -n "$NO_VIBE_REQUESTED_FLAG" && -n "$VIBE_REQUESTED_FLAG" ]]; then
+    echo "Error: $NO_VIBE_REQUESTED_FLAG cannot be combined with $VIBE_REQUESTED_FLAG" >&2
+    echo "  $VIBE_REQUESTED_FLAG asks for the continuous surface (daemon, agent hooks," >&2
+    echo "  MCP server, generated skills). $NO_VIBE_REQUESTED_FLAG removes it." >&2
+    echo "  Pass one or the other, not both." >&2
+    echo "  (--no-baseline / --no-auto-vibe / --skip-vibe-baseline are a different" >&2
+    echo "   thing: they only skip the baseline scan and combine freely with either.)" >&2
+    exit 2
+fi
+
+if [[ -n "$NO_VIBE_REQUESTED_FLAG" ]]; then
+    ENABLE_VIBE_CODING=false
+    VIBE_SURFACE_REASON="$NO_VIBE_REQUESTED_FLAG"
+elif [[ -n "$VIBE_REQUESTED_FLAG" ]]; then
+    ENABLE_VIBE_CODING=true
+    VIBE_SURFACE_REASON="$VIBE_REQUESTED_FLAG"
+else
+    ENABLE_VIBE_CODING=true
+    VIBE_SURFACE_REASON="default"
+fi
 
 if [[ -n "${REACHABLE_DIST_ROOT:-}" && -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
     echo "Error: use either REACHABLE_DIST_ROOT/--dist-root or REACHABLE_DIST_BASE_URL/--dist-base-url, not both"
@@ -1610,7 +1704,29 @@ resolve_vibe_workspace() {
     echo "$PWD"
 }
 
+# Always states the resolved surface and why it was resolved that way, so that
+# "no daemon" is never something a user has to infer from its absence.
+announce_vibe_surface() {
+    if [[ "$ENABLE_VIBE_CODING" == true ]]; then
+        print_step "Continuous surface: installing (reason: $VIBE_SURFACE_REASON)"
+        print_info "Daemon, agent hooks, MCP server, and generated skills."
+        if [[ "$VIBE_SURFACE_REASON" == "default" ]]; then
+            print_info "Pass --no-vibe on CI runners and other ephemeral hosts to skip it."
+        fi
+    else
+        print_step "Continuous surface: not installed (reason: $VIBE_SURFACE_REASON)"
+        print_info "Scanner only: no daemon, no agent hooks, no MCP server, no skills."
+        print_info "reachctl scan and reachctl remediate work; reachctl vibe * does not."
+        print_info "To add the surface later, rerun the installer with --vibe."
+        if [[ -n "$VIBE_WORKSPACE" ]]; then
+            print_warn "--repo/--workspace '$VIBE_WORKSPACE' is unused: nothing is being wired."
+        fi
+    fi
+}
+
 run_vibe_setup() {
+    announce_vibe_surface
+
     if [[ "$ENABLE_VIBE_CODING" != true ]]; then
         return
     fi
@@ -1711,8 +1827,15 @@ print_success() {
     local path_hint=""
     local summary_mode="${REACHABLE_INSTALLER_SUMMARY:-auto}"
     local compact_success=false
+    local surface_line
+    # State the surface explicitly in the upgrade command so an upgrade
+    # reproduces this install instead of re-deciding it.
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
         upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update --vibe"
+        surface_line="Surface: continuous — daemon, agent hooks, MCP server, skills (reason: $VIBE_SURFACE_REASON)"
+    else
+        upgrade_cmd="curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update --no-vibe"
+        surface_line="Surface: scanner only — no daemon, hooks, MCP server, or skills (reason: $VIBE_SURFACE_REASON)"
     fi
     case "$PATH_CONFIG_STATUS" in
         updated)
@@ -1758,6 +1881,7 @@ print_success() {
         if [[ -n "$VIBE_UI_URL" ]]; then
             echo "  Dashboard: $VIBE_UI_URL"
         fi
+        echo "  $surface_line"
         echo "  $path_hint"
         if [[ -n "${INSTALL_LOG:-}" ]]; then
             echo "  Install log: $INSTALL_LOG"
@@ -1770,6 +1894,9 @@ print_success() {
         echo ""
         return
     fi
+    echo -e "  ${BOLD}Installed:${NC}"
+    echo "    $surface_line"
+    echo ""
     echo -e "  ${BOLD}Start Here:${NC}"
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
         if [[ -n "$VIBE_UI_URL" ]]; then

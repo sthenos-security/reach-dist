@@ -5,7 +5,7 @@ Risk Exposure Validation for the AI era. REACHABLE combines deterministic valida
 ## Quick Start
 
 ```bash
-# Install
+# Install — run this from your repo root
 curl -fsSL https://sthenosec.com/download/install.sh | bash
 
 # Open a new shell (installer writes PATH to your shell rc automatically)
@@ -17,6 +17,13 @@ reachctl scan /path/to/your/repo
 
 That's it. When the scan finishes, open the dashboard link printed in the terminal — or run `reachctl dashboard --open`.
 
+**One install mode.** That single command installs the `reachctl` scanner *and*
+the continuous surface: the local daemon, coding-agent hooks, the MCP server,
+and the generated skills/rules. The skills loop is the product, so the component
+that delivers it is not an add-on. CI runners opt out with
+[`--no-vibe`](#ci-runners-and-other-ephemeral-hosts). The installer always
+prints which surface it installed and why.
+
 The public installer bootstrap verifies the signed release manifest, checks the
 downloaded installer SHA-256, verifies the installer with Sigstore/cosign, and
 only then runs the installer. The installer then verifies the wheel, dependency
@@ -24,44 +31,72 @@ constraints, and signed release artifacts before installing.
 
 **Requirements:** Python 3.11+, `curl`, `python3`, `cosign`, and either Linux (x86_64/ARM64) or macOS (Apple Silicon/Intel).
 
-### Vibe-coding quick start
-
-For local coding-agent protection, the first-cut install path is shell-first:
+### What the default install does
 
 ```bash
-curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe
+curl -fsSL https://sthenosec.com/download/install.sh | bash
 ```
-
-That path:
 
 - verifies the signed release manifest and installer before execution
 - installs the main `reachable` wheel
 - verifies wheel checksums, cosign bundles, and hash-pinned dependencies
 - bootstraps external tools automatically
-- runs bundled `reach-vibe` setup
 - starts the local daemon
-- wires supported local coding agents in the current repo
+- wires supported local coding agents in the current repo (hooks, MCP, skills)
 - does not start a baseline scan unless you pass `--baseline`
 
 If you are testing locally from the `reach-dist` checkout:
 
 ```bash
-./install.sh --vibe
+./install.sh
 ```
 
 Useful public installer variants:
 
 ```bash
-curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent codex
-curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --agent cursor
-curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --repo /path/to/repo
-curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --vibe --baseline
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --agent codex
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --agent cursor
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --repo /path/to/repo
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --baseline
 ```
 
 Use `--baseline` only when you want install to run the first baseline scan and
 build the initial DB-backed skill/rule bundle. The `--no-baseline`,
 `--no-auto-vibe`, and `--skip-vibe-baseline` aliases still work as
-compatibility no-ops because scan startup is now explicit.
+compatibility no-ops because scan startup is now explicit. **None of those three
+turn off the continuous surface** — only `--no-vibe` does that.
+
+`--vibe` and `--vibe-coding` are still accepted and still install the full
+surface. They are now redundant with the default, and every published agent
+plugin sends `--vibe`, so they will keep working.
+
+### CI runners and other ephemeral hosts
+
+```bash
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --no-vibe
+```
+
+`--no-vibe` (long form `--no-vibe-coding`) installs the scanner alone: no
+daemon, no agent hooks, no MCP server, no generated skills. It exists for one
+host type — CI runners and other ephemeral, non-interactive machines. A pipeline
+is single-shot, usually containerised, and has nothing to supervise a
+filesystem-watching daemon, so starting one there is waste at best and a hang
+risk at worst. **Do not use it on a developer machine:** it removes the loop you
+installed REACHABLE for. A `--no-vibe` install still has the full scanner and
+`reachctl remediate`; only `reachctl vibe *`, the MCP tools, and the live
+dashboard view are absent.
+
+`--no-vibe` cannot be combined with `--vibe`, `--vibe-coding`, `--agent`, or
+`--baseline` — those ask for the surface it removes. The installer exits 2 with
+both flag names rather than picking a winner.
+
+The public `https://sthenosec.com/download/install.sh` bootstrap detects
+`GITHUB_ACTIONS`, `GITLAB_CI`, and `CI`, and installs the scanner alone on those
+hosts so that pipelines pinned to a flagless `install.sh` do not silently gain a
+daemon. It prints what it detected, and `--vibe` overrides it. That detection
+lives in the bootstrap only — `install.sh` itself never reads the environment to
+decide the surface, so there is exactly one place that can make this call. Both
+paths always print the resolved surface and the reason for it.
 
 After install:
 
@@ -70,17 +105,24 @@ reachctl vibe ui                       # open the global dashboard
 reachctl vibe status                   # show daemon + all known workspaces
 reachctl vibe status --repo /path/to/repo
 reachctl vibe stats --repo /path/to/repo
-reachctl vibe remediate --repo /path/to/repo --branch-name reach-vibe-demo
 reachctl remediate --repo /path/to/repo --agent codex --all
+reachctl remediate --repo /path/to/repo --agent codex --all --branch-name reach-vibe-demo
 ps -ef | grep '[r]each_agent _daemon'  # low-level daemon check
 ```
 
 If explicitly requested, the baseline scan and skill synthesis do not modify
 product source code. They write scanner truth into `repo.db`, update
-`.reachable/ai-rules/`, and refresh agent guidance. Those rules are used on
-the next hook/MCP/agent event or by an explicit `reachctl vibe remediate` run.
-For reviewable code changes, pass `--branch-name`; the installer does not
-silently create a branch or rewrite the repo.
+`.reachable/ai-rules/`, and install the generated rules into each wired agent's
+own guidance files (`AGENTS.md`, `CLAUDE.md`, `.claude/skills/`,
+`.cursor/rules/`). The coding agent picks those up on its next turn, the way it
+reads any of its rule files.
+
+Applying them to code is a separate, explicit step. **Nothing starts a
+remediation run on your behalf** — not the daemon, not a hook, not the MCP
+server. A run only begins when you invoke `reachctl remediate` (or
+`reachctl scan --remediate`). For reviewable code changes, pass `--branch-name`;
+neither the installer nor the daemon silently creates a branch or rewrites the
+repo.
 
 For CI or desktop agent orchestration, `reachctl remediate` writes
 `.reachable/remediation-bundle/prompt.md`, `bundle.json`, `ai-rules/`, and
@@ -204,6 +246,13 @@ curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --update
 
 Use `--clean` when upgrading from a beta release to avoid database compatibility issues. Other installer options: `--version <ver>` to pin a specific version, `--wheel <path>` for local installs, `--list` to see available releases.
 
+An upgrade resolves the surface the same way a fresh install does, so add
+`--no-vibe` when upgrading a CI runner and `--vibe` when upgrading a developer
+machine that a wrapper might read as CI. The installer prints the upgrade
+command that reproduces the surface it just installed.
+
+Run `./install.sh --help` for the full option list.
+
 ### Candidate bundle testing
 
 Candidate and alpha installers can be tested without resolving production
@@ -239,6 +288,18 @@ Fork one of these repos and your pipeline runs REACHABLE automatically:
 | Jenkins | [`jenkins/Jenkinsfile`](jenkins/Jenkinsfile) in this repo |
 
 AI runs automatically if `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` is set as a repo secret.
+
+Install on a runner with `--no-vibe` — a pipeline is ephemeral and single-shot
+and has no supervisor for a background daemon:
+
+```bash
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --no-vibe
+```
+
+The public bootstrap also detects `GITHUB_ACTIONS`, `GITLAB_CI`, and `CI` and
+installs the scanner alone there even without the flag, printing what it
+detected. Pass the flag anyway if your pipeline pins the installer asset
+directly from the GitHub release, since that path bypasses the bootstrap.
 
 For CI mode with threshold gating: `reachctl scan /path --ci --fail-on high`
 
