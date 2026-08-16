@@ -328,6 +328,11 @@ if len(data) > 10:
     echo ""
 }
 
+release_tag_for_version() {
+    local version="${1#v}"
+    printf 'v%s\n' "$version"
+}
+
 dist_artifact_source() {
     local name="$1"
     if [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
@@ -335,7 +340,19 @@ dist_artifact_source() {
     elif [[ -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
         printf '%s/%s\n' "${REACHABLE_DIST_BASE_URL%/}" "$name"
     else
-        printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$RELEASE_TAG" "$name"
+        # RELEASE_TAG is set during normal argument resolution, but this function is
+        # also reachable before that runs. Derive it from VERSION rather than dying
+        # on an unbound variable -- and refuse outright if neither is known, since a
+        # download URL with an empty tag in it is a 404 dressed up as progress.
+        local tag="${RELEASE_TAG:-}"
+        if [[ -z "$tag" && -n "${VERSION:-}" ]]; then
+            tag="$(release_tag_for_version "$VERSION")"
+        fi
+        if [[ -z "$tag" ]]; then
+            echo "Error: cannot build a download URL for '$name': neither RELEASE_TAG nor VERSION is set." >&2
+            return 1
+        fi
+        printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$tag" "$name"
     fi
 }
 
@@ -584,11 +601,6 @@ fi
 selector_looks_like_version() {
     local selector="${1:-}"
     [[ "$selector" =~ ^v?[0-9]+(\.[0-9]+){2}([A-Za-z0-9._-]+)?$ ]]
-}
-
-release_tag_for_version() {
-    local version="${1#v}"
-    printf 'v%s\n' "$version"
 }
 
 resolve_version_from_release_tag() {
@@ -1255,7 +1267,8 @@ download_and_install() {
         # Install the main wheel.  --find-links lets pip resolve any remaining
         # dependencies; --only-binary for each vendor package prevents fallback
         # to source builds when no compiler is present.
-        # shellcheck disable=SC2086,SC2046 -- intentional word-splitting for optional pip flags
+        # Intentional word-splitting for optional pip flags.
+        # shellcheck disable=SC2086,SC2046
         if ! run_pip_with_retries "Installing REACHABLE wheel dependencies" "$REACHABLE_PIP_ATTEMPTS" \
             "$HOME/.reachable/venv/bin/python" -u -m pip install \
             $VENDOR_FIND_LINKS \
@@ -1540,7 +1553,8 @@ download_and_install() {
     if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
         VENDOR_FIND_LINKS_REMOTE="--find-links vendor/"
     fi
-    # shellcheck disable=SC2086,SC2046 -- intentional word-splitting for optional pip flags
+    # Intentional word-splitting for optional pip flags.
+    # shellcheck disable=SC2086,SC2046
     if ! run_pip_with_retries "Installing REACHABLE wheel" "$REACHABLE_PIP_ATTEMPTS" \
         "$HOME/.reachable/venv/bin/python" -u -m pip install \
         $VENDOR_FIND_LINKS_REMOTE \
@@ -1845,6 +1859,8 @@ print_success() {
             path_hint="PATH already configured in $PATH_CONFIG_TARGET."
             ;;
         *)
+            # Display text for the user, not a path this script expands.
+            # shellcheck disable=SC2088
             path_hint="~/.reachable/venv/bin is available to the installer runtime."
             ;;
     esac
