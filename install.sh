@@ -1530,8 +1530,45 @@ download_and_install() {
         print_info "Every dependency entry MUST include --hash."
         exit 1
     fi
+
+    # Authenticate the file itself, not just its shape.
+    #
+    # The --hash= check above proves only that the file CONTAINS hashes; pip's
+    # --require-hashes then enforces those hashes against what it downloads.
+    # Both are internal-consistency checks. An attacker who can rewrite this
+    # file in transit adds a package whose hash matches their own real PyPI
+    # artifact, and pip installs it while reporting every hash as satisfied.
+    # constraints.txt is the authoritative dependency list for the entire
+    # install (fed to `pip install --require-hashes -r` below), and unlike
+    # checksums.sha256 there is no second gate behind it.
+    #
+    # The signature has been published in every release since at least
+    # v1.0.0b154 (verified against the live release API for b154, b160, b164)
+    # and is produced by the same SIGN_FILES step that signs the wheel
+    # (reach-core .github/workflows/release.yml). It was simply never fetched.
+    #
+    # cosign is already installed and verified by this point: the wheel's own
+    # verification runs earlier in this function.
+    CONSTRAINTS_BUNDLE="constraints.txt.cosign.bundle"
+    if ! download_dist_artifact "Downloading constraints signature" "$CONSTRAINTS_BUNDLE" "$CONSTRAINTS_BUNDLE"; then
+        print_error "Could not fetch constraints signature — aborting (supply chain risk)"
+        print_info "Source: $(dist_artifact_source "$CONSTRAINTS_BUNDLE")"
+        print_info "Every release MUST include a cosign bundle for constraints.txt."
+        exit 1
+    fi
+    if ! cosign verify-blob \
+        --bundle "$CONSTRAINTS_BUNDLE" \
+        --certificate-identity-regexp "https://github.com/sthenos-security/" \
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+        constraints.txt &>/dev/null; then
+        print_error "Constraints signature verification FAILED — aborting"
+        print_info "constraints.txt was not signed by Sthenos Security CI or was tampered with."
+        print_info "This file decides which dependency versions get installed."
+        exit 1
+    fi
+
     CONSTRAINTS_MODE="hash"
-    print_ok "Dependency constraints verified (hash-pinned)"
+    print_ok "Dependency constraints verified (hash-pinned, Sigstore-signed)"
 
     # Download pre-compiled vendor wheels (C extensions: psutil, ruamel.yaml.clib)
     # Built and signed in CI — no PyPI contact, no compiler needed on customer machine.
