@@ -25,3 +25,6 @@ jobs:
 
       - name: Cosign pinning smoke
         run: bash ./test-installer-cosign-pin.sh
+
+      - name: Constraints signature smoke
+        run: bash ./test-installer-constraints-signature.sh
