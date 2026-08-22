@@ -1200,6 +1200,97 @@ handle_existing_install() {
 }
 
 # -----------------------------------------------------------------------------
+# Pinned cosign (the verifier must itself be verified)
+# -----------------------------------------------------------------------------
+# cosign is what proves the wheel was signed by Sthenos Security CI. If cosign
+# itself arrives unpinned and unchecked over the same TLS channel as the wheel,
+# an attacker who can intercept that channel (a MITM proxy is enough — no GitHub
+# compromise required) can serve a cosign that exits 0 and every downstream
+# check passes. So: pin the release, and check the binary against a SHA-256
+# baked into this script. Fail closed on any mismatch.
+#
+# Digests below are for cosign v3.1.3, taken from the Sigstore-signed
+# cosign_checksums.txt published with that release
+# (https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign_checksums.txt,
+# signature bundle cosign_checksums.txt.sigstore.json, keyless identity
+# keyless@projectsigstore.iam.gserviceaccount.com / https://accounts.google.com).
+# Bump COSIGN_PINNED_VERSION and all four digests together, and re-verify the
+# checksums signature before doing so.
+COSIGN_PINNED_VERSION="v3.1.3"
+
+cosign_pinned_sha256() {
+    # $1 = os (linux|darwin), $2 = arch (amd64|arm64)
+    case "$1-$2" in
+        linux-amd64)  echo "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71" ;;
+        linux-arm64)  echo "c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a" ;;
+        darwin-amd64) echo "2347488e5d5b25336644024dfeca5601b190e91197a71a917bda44744aff106c" ;;
+        darwin-arm64) echo "5cf948c2f4dfe59687bdd0b8523709067383e03982cc543475c8a7dc70e92a76" ;;
+        *) return 1 ;;
+    esac
+}
+
+install_pinned_cosign() {
+    local os="$1"
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64)  arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+    esac
+
+    local expected
+    if ! expected=$(cosign_pinned_sha256 "$os" "$arch"); then
+        print_error "No pinned cosign digest for ${os}/${arch} — aborting"
+        print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
+        return 1
+    fi
+
+    local url="https://github.com/sigstore/cosign/releases/download/${COSIGN_PINNED_VERSION}/cosign-${os}-${arch}"
+    local cosign_tmp
+    mkdir -p "$REACHABLE_TMP_ROOT"
+    cosign_tmp=$(mktemp "$REACHABLE_TMP_ROOT/cosign.XXXXXX")
+    if ! download_with_retries "Downloading cosign ${COSIGN_PINNED_VERSION}" "$url" "$cosign_tmp"; then
+        rm -f "$cosign_tmp"
+        print_error "Failed to download cosign — aborting"
+        print_info "URL: $url"
+        print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
+        return 1
+    fi
+
+    local actual=""
+    if command -v sha256sum &>/dev/null; then
+        actual=$(sha256sum "$cosign_tmp" | awk '{print $1}')
+    elif command -v shasum &>/dev/null; then
+        actual=$(shasum -a 256 "$cosign_tmp" | awk '{print $1}')
+    else
+        rm -f "$cosign_tmp"
+        print_error "No sha256sum/shasum available to verify cosign — aborting (supply chain risk)"
+        print_info "Install coreutils (sha256sum) or cosign itself, then re-run."
+        return 1
+    fi
+
+    if [[ "$expected" != "$actual" ]]; then
+        rm -f "$cosign_tmp"
+        print_error "COSIGN BINARY DIGEST MISMATCH — aborting (supply chain risk)"
+        print_info "Pinned:   $expected"
+        print_info "Received: $actual"
+        print_info "The cosign download does not match the digest pinned in this installer."
+        print_info "Do NOT proceed — the signature verifier itself may have been tampered with."
+        return 1
+    fi
+
+    chmod +x "$cosign_tmp"
+    mkdir -p "$HOME/.reachable/tools/bin"
+    mv "$cosign_tmp" "$HOME/.reachable/tools/bin/cosign"
+    # F-009c: idempotent PATH append (CWE-426)
+    case ":$PATH:" in
+        *":$HOME/.reachable/tools/bin:"*) ;;
+        *) export PATH="$HOME/.reachable/tools/bin:$PATH" ;;
+    esac
+    print_ok "Installed cosign ${COSIGN_PINNED_VERSION} to ~/.reachable/tools/bin/ (SHA-256 pinned)"
+}
+
+# -----------------------------------------------------------------------------
 # Download & Install
 # -----------------------------------------------------------------------------
 download_and_install() {
@@ -1371,31 +1462,10 @@ download_and_install() {
                 exit 1
             fi
             print_ok "Installed cosign via Homebrew"
-        elif [[ "$OS" == "linux" ]]; then
-            COSIGN_ARCH=$(uname -m)
-            if [[ "$COSIGN_ARCH" == "x86_64" ]]; then
-                COSIGN_ARCH="amd64"
-            elif [[ "$COSIGN_ARCH" == "aarch64" ]]; then
-                COSIGN_ARCH="arm64"
-            fi
-            COSIGN_URL="https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-${COSIGN_ARCH}"
-            local cosign_tmp
-            cosign_tmp=$(mktemp "$REACHABLE_TMP_ROOT/cosign.XXXXXX")
-            if ! download_with_retries "Downloading cosign" "$COSIGN_URL" "$cosign_tmp"; then
-                print_error "Failed to download cosign — aborting"
-                print_info "URL: $COSIGN_URL"
-                print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
-                exit 1
-            fi
-            chmod +x "$cosign_tmp"
-            mkdir -p "$HOME/.reachable/tools/bin"
-            mv "$cosign_tmp" "$HOME/.reachable/tools/bin/cosign"
-            # F-009c: idempotent PATH append (CWE-426)
-            case ":$PATH:" in
-                *":$HOME/.reachable/tools/bin:"*) ;;
-                *) export PATH="$HOME/.reachable/tools/bin:$PATH" ;;
-            esac
-            print_ok "Installed cosign to ~/.reachable/tools/bin/"
+        elif [[ "$OS" == "linux" || "$OS" == "darwin" ]]; then
+            # Version-pinned, SHA-256-verified download. Also covers macOS
+            # without Homebrew, which previously hard-failed here.
+            install_pinned_cosign "$OS" || exit 1
         else
             print_error "cosign not available and cannot auto-install on this platform — aborting"
             print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
