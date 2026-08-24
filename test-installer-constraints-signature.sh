@@ -47,7 +47,7 @@ fi
 for required in \
     '--bundle' \
     '--certificate-identity-regexp' \
-    'https://github.com/sthenos-security/' \
+    '$COSIGN_IDENTITY_REGEXP' \
     '--certificate-oidc-issuer' \
     'https://token.actions.githubusercontent.com'
 do
@@ -55,6 +55,53 @@ do
         || { rm -f /tmp/.constraints_verify_block.$$; fail "constraints verification is missing '$required' -- an unbound identity check verifies that SOMEBODY signed it"; }
 done
 rm -f /tmp/.constraints_verify_block.$$
+
+# 2b. The identity must be NARROW, not merely present. This block previously
+#     required the literal 'https://github.com/sthenos-security/' -- which was
+#     UNANCHORED, so it accepted a keyless signature from any workflow in any
+#     repository in the organisation, and the test enshrined that value as the
+#     requirement. A check that asserts the flag exists while its value admits the
+#     whole org is the one-sided guard this file's own comment warns about, one
+#     level up.
+if grep -Fq 'COSIGN_IDENTITY_REGEXP="https://github.com/sthenos-security/"' "$INSTALLER" \
+    || grep -Eq -- "--certificate-identity-regexp +[\"']https://github\.com/sthenos-security/[\"']" "$INSTALLER"; then
+    fail "install.sh accepts a signature from ANY repo in the organisation"
+fi
+
+# Derive the identity the installer will actually use, by sourcing it, rather than
+# restating the pattern here -- a second copy is what rotted last time.
+IDENTITY="$(
+    HOME="$(mktemp -d)" REACHABLE_INSTALLER_SOURCE_ONLY=1 \
+        bash -c "source '$INSTALLER' >/dev/null 2>&1; printf '%s' \"\$COSIGN_IDENTITY_REGEXP\""
+)"
+[[ -n "$IDENTITY" ]] || fail "install.sh defines no COSIGN_IDENTITY_REGEXP"
+[[ "$IDENTITY" == ^* ]] || fail "identity '$IDENTITY' is not anchored at the start"
+[[ "$IDENTITY" == *'$' ]] || fail "identity '$IDENTITY' is not anchored at the end"
+case "$IDENTITY" in
+    *'/reach-core/'*) : ;;
+    *) fail "identity '$IDENTITY' does not pin the reach-core repository" ;;
+esac
+case "$IDENTITY" in
+    *'refs/tags/'*) : ;;
+    *) fail "identity '$IDENTITY' accepts a branch build, not just a release tag" ;;
+esac
+
+# Prove the pattern refuses what it must refuse, using the real regex engine rather
+# than reasoning about it. The accept case is the identity measured on every one of
+# the 34 signed assets of v1.0.0b166.
+REAL='https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v1.0.0b166'
+printf '%s\n' "$REAL" | grep -Eq -- "$IDENTITY" \
+    || fail "identity '$IDENTITY' rejects a real release signature"
+for bad in \
+    'https://github.com/sthenos-security/reach-cloud/.github/workflows/release.yml@refs/tags/v1.0.0b166' \
+    'https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/heads/main' \
+    'https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v0.0.1-canary' \
+    'https://evil.example/https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v1.0.0b166'
+do
+    if printf '%s\n' "$bad" | grep -Eq -- "$IDENTITY"; then
+        fail "identity accepts an untrusted signer: $bad"
+    fi
+done
 
 # 3. Ordering: the verification must happen BEFORE the file is used. A gate
 #    downstream of the thing it guards is not a gate.

@@ -1218,6 +1218,34 @@ handle_existing_install() {
 # checksums signature before doing so.
 COSIGN_PINNED_VERSION="v3.1.3"
 
+# WHO is allowed to have signed what we install. One definition, used by every
+# cosign call below -- the wheel, constraints.txt and the vendor archives.
+#
+# This replaced "https://github.com/sthenos-security/", which was UNANCHORED and
+# therefore matched any certificate subject merely CONTAINING that string. In
+# practice that meant a keyless signature produced by ANY workflow in ANY
+# repository in the organisation -- a docs repo, a demo repo, a CI scratch repo --
+# was accepted as an official release, and install.sh then installed the wheel.
+# The OIDC issuer was pinned, which is what kept it to GitHub-issued subjects, so
+# the realistic blast radius was org-wide rather than internet-wide. Still wrong:
+# the wheel is the product.
+#
+# Measured 2026-08-24: all 34 signed assets of v1.0.0b166 -- including all 12
+# wheels, all 8 vendor tarballs and constraints.txt -- carry exactly one identity,
+#   https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v1.0.0b166
+# so one narrow pattern covers every artifact this installer verifies.
+#
+# Anchored at both ends. Constrains the org and repo, the workflows directory
+# (tolerating a rename within convention, because pinning an exact filename breaks
+# every release at once if CI is split into a caller plus a reusable workflow), a
+# TAG ref so a branch build cannot sign a release, and the tag SHAPE so a throwaway
+# tag does not inherit release trust.
+#
+# KNOWN LIMIT: a git tag is mutable, so a re-tag plus a workflow re-run yields a
+# byte-identical identity this cannot distinguish. That is addressed by a tag
+# ruleset on reach-core forbidding deletion and non-fast-forward, not here.
+COSIGN_IDENTITY_REGEXP='^https://github\.com/sthenos-security/reach-core/\.github/workflows/release[a-z0-9._-]*\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)?[0-9]*$'
+
 cosign_pinned_sha256() {
     # $1 = os (linux|darwin), $2 = arch (amd64|arm64)
     case "$1-$2" in
@@ -1483,7 +1511,7 @@ download_and_install() {
     fi
     if ! cosign verify-blob \
         --bundle "$COSIGN_BUNDLE" \
-        --certificate-identity-regexp "https://github.com/sthenos-security/" \
+        --certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
         --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
         "$WHEEL_FILE" &>/dev/null; then
         print_error "Cosign signature verification FAILED — aborting"
@@ -1558,7 +1586,7 @@ download_and_install() {
     fi
     if ! cosign verify-blob \
         --bundle "$CONSTRAINTS_BUNDLE" \
-        --certificate-identity-regexp "https://github.com/sthenos-security/" \
+        --certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
         --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
         constraints.txt &>/dev/null; then
         print_error "Constraints signature verification FAILED — aborting"
@@ -1603,7 +1631,7 @@ download_and_install() {
             fi
             if cosign verify-blob \
                 --bundle "$VENDOR_BUNDLE" \
-                --certificate-identity-regexp "https://github.com/sthenos-security/" \
+                --certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
                 --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
                 "$VENDOR_ARCHIVE" &>/dev/null; then
                 print_ok "Vendor archive signature verified (Sigstore)"
