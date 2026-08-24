@@ -133,4 +133,18 @@ if grep -Fq 'Dependency constraints verified (hash-pinned)"' "$INSTALLER"; then
     fail "the success message still claims 'verified' for a shape check alone"
 fi
 
+# 2c. verify-wheel.sh -- the script we hand CUSTOMERS to check our work -- must not
+#     carry its own idea of who is allowed to have signed. It had one, and it had
+#     drifted from install.sh's: this one pinned reach-core but accepted any workflow
+#     on any ref including a branch build, while install.sh accepted any repo in the
+#     organisation. Two scripts, two answers, and this is the one that looks
+#     authoritative to a customer.
+if [ -f "$ROOT_DIR/verify-wheel.sh" ]; then
+    if grep -Eq -- '--certificate-identity-regexp=?"https://github' "$ROOT_DIR/verify-wheel.sh"; then
+        fail "verify-wheel.sh hardcodes a signing identity instead of reading install.sh's"
+    fi
+    grep -Fq 'COSIGN_IDENTITY_REGEXP' "$ROOT_DIR/verify-wheel.sh" \
+        || fail "verify-wheel.sh does not use the shared COSIGN_IDENTITY_REGEXP"
+fi
+
 echo "installer constraints signature test passed"
