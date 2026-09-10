@@ -366,4 +366,4 @@ Questions or false positive reports? Email **info@sthenosec.com**.
 
 See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for dependencies and licenses.
 
-© 2026 Sthenos Security. All rights reserved.
+© 2026 Sthenos Security, Inc. All rights reserved.

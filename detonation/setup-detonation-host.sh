@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright © 2026 Sthenos Security. All rights reserved.
+# Copyright © 2026 Sthenos Security, Inc. All rights reserved.
 #
 # REACHABLE — Detonation Host Setup Script
 #
@@ -463,7 +463,7 @@ main() {
     echo "  ╔══════════════════════════════════════════════════╗"
     echo "  ║   REACHABLE — Detonation Host Setup             ║"
     echo "  ║   Supply Chain Malware Detonation Service        ║"
-    echo "  ║   © 2026 Sthenos Security                       ║"
+    echo "  ║   © 2026 Sthenos Security, Inc.                 ║"
     echo "  ╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
 

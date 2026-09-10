@@ -453,4 +453,4 @@ rm -f ~/.reachable/sandbox_known_hosts
 
 ---
 
-© 2026 Sthenos Security. All rights reserved.
+© 2026 Sthenos Security, Inc. All rights reserved.

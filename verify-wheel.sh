@@ -2,7 +2,7 @@
 # Verify REACHABLE wheel signature (keyless cosign / Sigstore)
 # Usage: ./verify-wheel.sh <wheel-file>
 #
-# Copyright © 2026 Sthenos Security. All rights reserved.
+# Copyright © 2026 Sthenos Security, Inc. All rights reserved.
 
 set -e
 

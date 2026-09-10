@@ -9,7 +9,7 @@
 #  ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚══════╝
 #
 #  Installer (GitHub CLI Edition)
-#  Copyright © 2026 Sthenos Security. All rights reserved.
+#  Copyright © 2026 Sthenos Security, Inc. All rights reserved.
 #
 #  Usage:
 #
@@ -2078,7 +2078,7 @@ print_success() {
     echo "    Upgrade:       $upgrade_cmd"
     echo ""
     echo "  Docs: https://sthenosec.com  |  Support: info@sthenosec.com"
-    echo "  © 2026 Sthenos Security. All rights reserved."
+    echo "  © 2026 Sthenos Security, Inc. All rights reserved."
     echo ""
 }
 

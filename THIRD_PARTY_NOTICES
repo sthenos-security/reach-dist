@@ -1,6 +1,6 @@
 THIRD-PARTY SOFTWARE NOTICES
 =============================
-REACHABLE — Sthenos Security
+REACHABLE — Sthenos Security, Inc.
 Last updated: 2026-04-23
 
 REACHABLE uses the following third-party software, either as Python
@@ -86,7 +86,7 @@ subprocess), or runtime assets.
   OWASP Agentic Top 10     CC-BY-SA-4.0     https://owasp.org/www-project-agentic-ai-threats/
 
   Custom REACHABLE rules written independently are proprietary to
-  Sthenos Security.
+  Sthenos Security, Inc.
 
 ─────────────────────────────────────────────────────────────────────────
 
