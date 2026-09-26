@@ -346,6 +346,25 @@ issuer/identity, or missing release metadata. Manual verification remains
 available for air-gapped review, but it is not required for the standard install
 path.
 
+## What's in a Release
+
+Each `v*` release publishes the following components. Every payload ships a
+`<asset>.cosign.bundle` sidecar signed by keyless Sigstore OIDC from the
+reach-core release workflow.
+
+| Component | Assets | Purpose |
+|---|---|---|
+| `reachable` wheel | 12 wheels: `reachable-<v>-cp{311,312,313,314}-*-{linux_aarch64,linux_x86_64,macosx_11_0_universal2}.whl` | The product; installed by `install.sh` or `pip` |
+| Vendor dependency bundles | `vendor-cp{311..314}-linux_{aarch64,x86_64}.tar.gz` | Hash-pinned offline/vendored dependencies |
+| Agent adapter packages | `reachable-<agent>-adapter-<v>.zip` + `.plugin.json` + `.aibom.json` per supported agent | Signed plugin packages installed via `install.sh --agent <name>` |
+| Plugin installer metadata | `reachable-plugin-installer-<v>.json`, `reachable-agent-plugins-1-0-adapter-<v>.*` | Agent plugin catalog and installer routing |
+| Release manifest | `reachable-release-manifest.json` | Signed manifest the installer verifies before downloading |
+| SBOM / AIBOM | `sbom.json`, per-adapter `*.aibom.json` | Component inventories for compliance and vendor review |
+| Checksums and constraints | `checksums.sha256`, `constraints.txt` | `--require-hashes` verified installs |
+| Release attestation | `release-attestation.json` / `.md` | Build provenance summary for audit |
+| Bootstrap installer | `install.sh` | The `curl … | bash` entrypoint, itself cosigned |
+| Air-gap bundle *(upcoming)* | Signed tarball per enclave platform | Self-contained offline install for disconnected environments; first publishes on an upcoming release |
+
 ---
 
 ## Roadmap
