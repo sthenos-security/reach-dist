@@ -1133,13 +1133,22 @@ handle_existing_install() {
         print_info "Target version:    $WHEEL_VERSION"
         
         if [[ "$INSTALLED_VERSION" == "$WHEEL_VERSION" && -x "$HOME/.reachable/venv/bin/reachctl" && "$CLEAN_DATA" != true ]]; then
-            SKIP_RUNTIME_INSTALL=true
-            if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
-                print_ok "reachable runtime is already current; verifying setup"
-            else
-                print_ok "REACHABLE runtime is already current; verifying setup"
+            # Version match is not enough. The venv python is a copied binary
+            # tied to the CPython that created it. CI's setup-python can make
+            # a stale copy start via LD_LIBRARY_PATH, then scan children die
+            # without that path. Prove it under a clean env.
+            if env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH \
+                 "$HOME/.reachable/venv/bin/python" -c 'import sys' >/dev/null 2>&1; then
+                SKIP_RUNTIME_INSTALL=true
+                if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+                    print_ok "reachable runtime is already current; verifying setup"
+                else
+                    print_ok "REACHABLE runtime is already current; verifying setup"
+                fi
+                return
             fi
-            return
+            print_warn "existing venv python cannot start on this interpreter; rebuilding"
+            rm -rf "$HOME/.reachable/venv"
         fi
 
         if [[ "$UPDATE_MODE" == true ]]; then
