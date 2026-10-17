@@ -1209,123 +1209,119 @@ handle_existing_install() {
 }
 
 # -----------------------------------------------------------------------------
-# Pinned cosign (the verifier must itself be verified)
+# Release trust root
 # -----------------------------------------------------------------------------
-# cosign is what proves the wheel was signed by Sthenos Security CI. If cosign
-# itself arrives unpinned and unchecked over the same TLS channel as the wheel,
-# an attacker who can intercept that channel (a MITM proxy is enough — no GitHub
-# compromise required) can serve a cosign that exits 0 and every downstream
-# check passes. So: pin the release, and check the binary against a SHA-256
-# baked into this script. Fail closed on any mismatch.
+# cosign is OUT of the install path (docs/design/INSTALLER-ATTESTATION.md,
+# items 8 + 10.1). It stays in CI — every release still ships .cosign.bundle
+# sidecars and verify-wheel.sh remains the manual audit path — but nothing
+# here downloads, installs, or consults it. What authenticates a release is
+# the dual-signed manifest:
 #
-# Digests below are for cosign v3.1.3, taken from the Sigstore-signed
-# cosign_checksums.txt published with that release
-# (https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign_checksums.txt,
-# signature bundle cosign_checksums.txt.sigstore.json, keyless identity
-# keyless@projectsigstore.iam.gserviceaccount.com / https://accounts.google.com).
-# Bump COSIGN_PINNED_VERSION and all four digests together, and re-verify the
-# checksums signature before doing so.
-COSIGN_PINNED_VERSION="v3.1.3"
+#   this pinned fingerprint  ->  root-signed key-list.json
+#                              ->  reachable-signed-manifest.json
+#                                 (all_of[release-ecdsa-p384,
+#                                        release-mldsa-87])
+#                              ->  sha384 of every artifact in it
+#
+# The fingerprint is SHA-384 over the enrolled ROOT public keys. It changes
+# only if the root set changes — a new release signing key is a key-list
+# version, not a re-pin. A mismatch is never routine: treat it as compromise.
+REACHABLE_ROOT_FINGERPRINT='kvQtc1UxbGgVbWqY9c2LJhmu1LPkiZrUToBo2rhf3/LWnMFn7UIZuI0HilEmrvIC'
 
-# WHO is allowed to have signed what we install. One definition, used by every
-# cosign call below -- the wheel, constraints.txt and the vendor archives.
-#
-# This replaced "https://github.com/sthenos-security/", which was UNANCHORED and
-# therefore matched any certificate subject merely CONTAINING that string. In
-# practice that meant a keyless signature produced by ANY workflow in ANY
-# repository in the organisation -- a docs repo, a demo repo, a CI scratch repo --
-# was accepted as an official release, and install.sh then installed the wheel.
-# The OIDC issuer was pinned, which is what kept it to GitHub-issued subjects, so
-# the realistic blast radius was org-wide rather than internet-wide. Still wrong:
-# the wheel is the product.
-#
-# Measured 2026-08-24: all 34 signed assets of v1.0.0b166 -- including all 12
-# wheels, all 8 vendor tarballs and constraints.txt -- carry exactly one identity,
-#   https://github.com/sthenos-security/reach-core/.github/workflows/release.yml@refs/tags/v1.0.0b166
-# so one narrow pattern covers every artifact this installer verifies.
-#
-# Anchored at both ends. Constrains the org and repo, the workflows directory
-# (tolerating a rename within convention, because pinning an exact filename breaks
-# every release at once if CI is split into a caller plus a reusable workflow), a
-# TAG ref so a branch build cannot sign a release, and the tag SHAPE so a throwaway
-# tag does not inherit release trust.
-#
-# KNOWN LIMIT: a git tag is mutable, so a re-tag plus a workflow re-run yields a
-# byte-identical identity this cannot distinguish. That is addressed by a tag
-# ruleset on reach-core forbidding deletion and non-fast-forward, not here.
-COSIGN_IDENTITY_REGEXP='^https://github\.com/sthenos-security/reach-core/\.github/workflows/release[a-z0-9._-]*\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)?[0-9]*$'
+# Verifies what the host's own openssl can: the P-384 root signature on the
+# key list and the P-384 manifest signature. That is half of each all_of
+# policy — enough to authenticate the channel through which the ML-DSA
+# verifier (cryptography) then arrives hash-pinned, which is exactly the
+# bootstrap the design's §7.2 names. The FULL all_of check runs after, in
+# verify_release_manifest.py, and nothing below trusts this half alone.
+_bootstrap_openssl_verify() {
+    # Runs in the download dir. Writes .trust/ files, prints nothing on
+    # success. Returns nonzero on any failure.
+    "$PY_BIN" - "$REACHABLE_ROOT_FINGERPRINT" <<'BOOTSTRAP_PY'
+import base64, hashlib, json, pathlib, shutil, subprocess, sys
 
-cosign_pinned_sha256() {
-    # $1 = os (linux|darwin), $2 = arch (amd64|arm64)
-    case "$1-$2" in
-        linux-amd64)  echo "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71" ;;
-        linux-arm64)  echo "c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a" ;;
-        darwin-amd64) echo "2347488e5d5b25336644024dfeca5601b190e91197a71a917bda44744aff106c" ;;
-        darwin-arm64) echo "5cf948c2f4dfe59687bdd0b8523709067383e03982cc543475c8a7dc70e92a76" ;;
-        *) return 1 ;;
-    esac
+fingerprint = sys.argv[1]
+d = pathlib.Path(".")
+t = d / ".trust"
+t.mkdir(exist_ok=True)
+
+def die(msg):
+    print(f"bootstrap verify: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+if not shutil.which("openssl"):
+    die("openssl not found — cannot verify the P-384 signature half (no verifier obtainable)")
+
+kl_raw = (d / "key-list.json").read_bytes()
+kl = json.loads(kl_raw)
+if kl.get("root_fingerprint") != fingerprint:
+    die("key-list root fingerprint does not match the pinned value")
+
+def der_int(x):
+    b = x.to_bytes((x.bit_length() + 7) // 8 or 1, "big")
+    if b[0] & 0x80:
+        b = b"\x00" + b
+    return b"\x02" + bytes([len(b)]) + b
+
+def raw_to_der(sig):
+    half = len(sig) // 2
+    body = der_int(int.from_bytes(sig[:half], "big")) + \
+           der_int(int.from_bytes(sig[half:], "big"))
+    return b"\x30" + bytes([len(body)]) + body
+
+def pem_from_spki_b64(b64):
+    der = base64.b64decode(b64)
+    return ("-----BEGIN PUBLIC KEY-----\n"
+            + base64.b64encode(der).decode()
+            + "\n-----END PUBLIC KEY-----\n")
+
+def openssl_verify(pub_pem, sig_der, msg):
+    p = t / "pub.pem"; s = t / "sig.der"
+    p.write_text(pub_pem); s.write_bytes(sig_der)
+    r = subprocess.run(
+        ["openssl", "dgst", "-sha384", "-verify", str(p), "-signature", str(s), msg],
+        capture_output=True)
+    return r.returncode == 0
+
+# 1. At least one P-384 root signature must verify over the key list.
+roots_p384 = [k for k in kl["keys"] if k["role"] == "root-ecdsa-p384"]
+ok = False
+for k in roots_p384:
+    sig_path = d / f"key-list.{k['key_id']}.sig"
+    if not sig_path.is_file():
+        continue
+    sig = sig_path.read_bytes()
+    if len(sig) in (96, 64, 132) and sig[0] != 0x30:
+        sig = raw_to_der(sig)
+    if openssl_verify(pem_from_spki_b64(k["pubkey"]), sig, "key-list.json"):
+        ok = True
+        break
+if not ok:
+    die("no P-384 root signature verifies the key list")
+
+# 2. The release P-384 signature must verify over the manifest.
+rel = [k for k in kl["keys"] if k["role"] == "release-ecdsa-p384"]
+if not rel:
+    die("key list names no release-ecdsa-p384 key")
+mf_sig = (d / "reachable-signed-manifest.json.p384.sig").read_bytes()
+if not openssl_verify(pem_from_spki_b64(rel[0]["pubkey"]), mf_sig,
+                      "reachable-signed-manifest.json"):
+    die("release manifest P-384 signature does not verify")
+
+# 3. The manifest now authenticates digests: the verifier script and
+#    constraints.txt must match before either is trusted.
+manifest = json.loads((d / "reachable-signed-manifest.json").read_text())
+digests = {a["name"]: a["sha384"] for a in manifest["artifacts"]}
+for name in ("verify_release_manifest.py", "constraints.txt"):
+    want = digests.get(name)
+    if want is None:
+        die(f"{name} is not bound by the manifest")
+    got = hashlib.sha384((d / name).read_bytes()).hexdigest()
+    if got != want:
+        die(f"sha384 mismatch on {name}")
+BOOTSTRAP_PY
 }
 
-install_pinned_cosign() {
-    local os="$1"
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64|amd64)  arch="amd64" ;;
-        aarch64|arm64) arch="arm64" ;;
-    esac
-
-    local expected
-    if ! expected=$(cosign_pinned_sha256 "$os" "$arch"); then
-        print_error "No pinned cosign digest for ${os}/${arch} — aborting"
-        print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
-        return 1
-    fi
-
-    local url="https://github.com/sigstore/cosign/releases/download/${COSIGN_PINNED_VERSION}/cosign-${os}-${arch}"
-    local cosign_tmp
-    mkdir -p "$REACHABLE_TMP_ROOT"
-    cosign_tmp=$(mktemp "$REACHABLE_TMP_ROOT/cosign.XXXXXX")
-    if ! download_with_retries "Downloading cosign ${COSIGN_PINNED_VERSION}" "$url" "$cosign_tmp"; then
-        rm -f "$cosign_tmp"
-        print_error "Failed to download cosign — aborting"
-        print_info "URL: $url"
-        print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
-        return 1
-    fi
-
-    local actual=""
-    if command -v sha256sum &>/dev/null; then
-        actual=$(sha256sum "$cosign_tmp" | awk '{print $1}')
-    elif command -v shasum &>/dev/null; then
-        actual=$(shasum -a 256 "$cosign_tmp" | awk '{print $1}')
-    else
-        rm -f "$cosign_tmp"
-        print_error "No sha256sum/shasum available to verify cosign — aborting (supply chain risk)"
-        print_info "Install coreutils (sha256sum) or cosign itself, then re-run."
-        return 1
-    fi
-
-    if [[ "$expected" != "$actual" ]]; then
-        rm -f "$cosign_tmp"
-        print_error "COSIGN BINARY DIGEST MISMATCH — aborting (supply chain risk)"
-        print_info "Pinned:   $expected"
-        print_info "Received: $actual"
-        print_info "The cosign download does not match the digest pinned in this installer."
-        print_info "Do NOT proceed — the signature verifier itself may have been tampered with."
-        return 1
-    fi
-
-    chmod +x "$cosign_tmp"
-    mkdir -p "$HOME/.reachable/tools/bin"
-    mv "$cosign_tmp" "$HOME/.reachable/tools/bin/cosign"
-    # F-009c: idempotent PATH append (CWE-426)
-    case ":$PATH:" in
-        *":$HOME/.reachable/tools/bin:"*) ;;
-        *) export PATH="$HOME/.reachable/tools/bin:$PATH" ;;
-    esac
-    print_ok "Installed cosign ${COSIGN_PINNED_VERSION} to ~/.reachable/tools/bin/ (SHA-256 pinned)"
-}
 
 # -----------------------------------------------------------------------------
 # Download & Install
@@ -1462,72 +1458,75 @@ download_and_install() {
     
     print_ok "Downloaded successfully"
 
-    # ── SHA-256 checksum verification (F-005: fail-closed) ─────────────────
-    print_step "Verifying integrity"
-    if ! download_dist_artifact "Downloading release checksums" checksums.sha256 checksums.sha256; then
-        print_error "Could not fetch checksums.sha256 — aborting (supply chain risk)"
-        print_info "Source: $(dist_artifact_source checksums.sha256)"
-        print_info "This file MUST exist for every release. If missing, the release may be compromised."
-        exit 1
-    fi
-    if ! grep -Fq "$WHEEL_FILE" checksums.sha256; then
-        print_error "No checksum entry for $WHEEL_FILE — aborting (supply chain risk)"
-        print_info "The checksums.sha256 file exists but does not contain an entry for this wheel."
-        print_info "This means the wheel was not built by CI or was tampered with after signing."
-        exit 1
-    fi
-    EXPECTED=$(grep -F "$WHEEL_FILE" checksums.sha256 | awk '{print $1}')
-    if command -v sha256sum &>/dev/null; then
-        ACTUAL=$(sha256sum "$WHEEL_FILE" | awk '{print $1}')
-    else
-        ACTUAL=$(shasum -a 256 "$WHEEL_FILE" | awk '{print $1}')
-    fi
-    if [[ "$EXPECTED" != "$ACTUAL" ]]; then
-        print_error "SHA-256 checksum FAILED — aborting"
-        print_info "Expected: $EXPECTED"
-        print_info "Actual:   $ACTUAL"
-        exit 1
-    fi
-    print_ok "SHA-256 checksum verified"
+    # ── Release manifest verification (replaces cosign; see the trust-root
+    #    comment block above). One manifest binds every artifact by SHA-384
+    #    and carries both KMS signatures; the key list that authenticates
+    #    those signatures is itself root-signed and chains to the pinned
+    #    fingerprint. Any failure is a hard stop — no flag bypasses it.
+    print_step "Verifying release"
 
-    # ── Cosign: auto-install if missing ──────────────────────────────────────
-    if ! command -v cosign &>/dev/null; then
-        if [[ "$OS" == "darwin" ]] && command -v brew &>/dev/null; then
-            if ! brew install cosign 2>/dev/null; then
-                print_error "Failed to install cosign via Homebrew — aborting"
-                print_info "Install manually: brew install cosign"
-                exit 1
-            fi
-            print_ok "Installed cosign via Homebrew"
-        elif [[ "$OS" == "linux" || "$OS" == "darwin" ]]; then
-            # Version-pinned, SHA-256-verified download. Also covers macOS
-            # without Homebrew, which previously hard-failed here.
-            install_pinned_cosign "$OS" || exit 1
-        else
-            print_error "cosign not available and cannot auto-install on this platform — aborting"
-            print_info "Install manually: https://docs.sigstore.dev/cosign/system_config/installation/"
+    for f in key-list.json \
+             reachable-signed-manifest.json \
+             reachable-signed-manifest.json.p384.sig \
+             reachable-signed-manifest.json.mldsa87.sig \
+             verify_release_manifest.py \
+             constraints.txt; do
+        if ! download_dist_artifact "Downloading $f" "$f" "$f"; then
+            print_error "Could not fetch $f — aborting (supply chain risk)"
+            print_info "Source: $(dist_artifact_source "$f")"
+            print_info "Every release MUST publish the signed manifest, the key list that"
+            print_info "authenticates it, and the verifier. If missing, the release may"
+            print_info "be compromised."
             exit 1
+        fi
+    done
+
+    # Root signatures are named key-list.<key_id>.sig; enumerate them from the
+    # key list itself so a rotated or added root needs no installer change.
+    KEY_SIGS=()
+    while IFS= read -r sig_name; do
+        [[ -n "$sig_name" ]] || continue
+        if ! download_dist_artifact "Downloading $sig_name" "$sig_name" "$sig_name"; then
+            print_error "Could not fetch $sig_name — aborting (supply chain risk)"
+            exit 1
+        fi
+        KEY_SIGS+=("$sig_name")
+    done < <("$PY_BIN" -c '
+import json
+doc = json.load(open("key-list.json"))
+print("\n".join(
+    "key-list." + k["key_id"] + ".sig"
+    for k in doc["keys"] if k["role"].startswith("root")))
+')
+    if [[ ${#KEY_SIGS[@]} -eq 0 ]]; then
+        print_error "key-list.json names no root signatures — aborting"
+        exit 1
+    fi
+
+    # Vendor wheels (Linux only): fetched now so the manifest check covers the
+    # archive too. Optional — absence is not an attack, platforms differ.
+    HAS_VENDOR_REMOTE=false
+    VENDOR_ARCHIVE=""
+    if [[ "$OS" == "linux" ]]; then
+        VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
+        if download_dist_artifact "Downloading vendor wheels" "$VENDOR_ARCHIVE" "$VENDOR_ARCHIVE"; then
+            HAS_VENDOR_REMOTE=true
+        else
+            VENDOR_ARCHIVE=""
+            print_info "No vendor wheels for this platform — dependencies from PyPI"
         fi
     fi
 
-    # ── Cosign signature verification (F-005: fail-closed) ────────────────────
-    COSIGN_BUNDLE="${WHEEL_FILE}.cosign.bundle"
-    if ! download_dist_artifact "Downloading cosign bundle" "$COSIGN_BUNDLE" "$COSIGN_BUNDLE"; then
-        print_error "Could not fetch cosign bundle — aborting (supply chain risk)"
-        print_info "Source: $(dist_artifact_source "$COSIGN_BUNDLE")"
-        print_info "Every release MUST include a cosign signature bundle."
+    # P-384 half via the host's own openssl: authenticates the key list, the
+    # manifest, and through it the digests of the verifier and constraints.
+    if ! _bootstrap_openssl_verify; then
+        print_error "Release verification FAILED — aborting"
+        print_info "The manifest or key list was not signed by Sthenos Security, or was"
+        print_info "tampered with in transit. Do NOT retry against a different mirror"
+        print_info "unless you trust it — and if this persists, report to info@sthenosec.com"
         exit 1
     fi
-    if ! cosign verify-blob \
-        --bundle "$COSIGN_BUNDLE" \
-        --certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
-        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-        "$WHEEL_FILE" &>/dev/null; then
-        print_error "Cosign signature verification FAILED — aborting"
-        print_info "The wheel was not signed by Sthenos Security CI or was tampered with."
-        exit 1
-    fi
-    print_ok "Cosign signature verified (Sigstore)"
+    print_ok "P-384 signature verified (openssl)"
 
     # Uninstall previous managed version
     if managed_reachable_version &> /dev/null; then
@@ -1553,111 +1552,72 @@ download_and_install() {
     run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
         "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
 
-    # Download hash-pinned constraints (blocks supply chain attacks on dependencies)
+    # constraints.txt was fetched with the trust artifacts and its sha384 was
+    # already checked against the manifest by _bootstrap_openssl_verify. Its
+    # hashes now authenticate everything pip touches.
     CONSTRAINTS_FLAG=""
     CONSTRAINTS_MODE="none"
-    if ! download_dist_artifact "Downloading dependency constraints" constraints.txt constraints.txt; then
-        print_error "Could not fetch constraints.txt — aborting (supply chain risk)"
-        print_info "Source: $(dist_artifact_source constraints.txt)"
-        print_info "Every release MUST include hash-pinned dependency constraints."
-        exit 1
-    fi
     if ! grep -q "\-\-hash=" constraints.txt 2>/dev/null; then
         print_error "constraints.txt is not hash-pinned — aborting (supply chain risk)"
         print_info "Every dependency entry MUST include --hash."
         exit 1
     fi
 
-    # Authenticate the file itself, not just its shape.
-    #
-    # The --hash= check above proves only that the file CONTAINS hashes; pip's
-    # --require-hashes then enforces those hashes against what it downloads.
-    # Both are internal-consistency checks. An attacker who can rewrite this
-    # file in transit adds a package whose hash matches their own real PyPI
-    # artifact, and pip installs it while reporting every hash as satisfied.
-    # constraints.txt is the authoritative dependency list for the entire
-    # install (fed to `pip install --require-hashes -r` below), and unlike
-    # checksums.sha256 there is no second gate behind it.
-    #
-    # The signature has been published in every release since at least
-    # v1.0.0b154 (verified against the live release API for b154, b160, b164)
-    # and is produced by the same SIGN_FILES step that signs the wheel
-    # (reach-core .github/workflows/release.yml). It was simply never fetched.
-    #
-    # cosign is already installed and verified by this point: the wheel's own
-    # verification runs earlier in this function.
-    CONSTRAINTS_BUNDLE="constraints.txt.cosign.bundle"
-    if ! download_dist_artifact "Downloading constraints signature" "$CONSTRAINTS_BUNDLE" "$CONSTRAINTS_BUNDLE"; then
-        print_error "Could not fetch constraints signature — aborting (supply chain risk)"
-        print_info "Source: $(dist_artifact_source "$CONSTRAINTS_BUNDLE")"
-        print_info "Every release MUST include a cosign bundle for constraints.txt."
+    # The full all_of verification needs `cryptography` (ML-DSA-87 has no
+    # openssl path). Install it hash-pinned from the manifest-authenticated
+    # constraints — the P-384-authenticated channel delivering the ML-DSA
+    # verifier, exactly the bootstrap §7.2 describes. No cryptography, no
+    # install: §5.4 says a host that cannot verify hard-stops.
+    if ! run_pip_with_retries "Installing signature verifier" "$REACHABLE_PIP_ATTEMPTS" \
+        "$HOME/.reachable/venv/bin/python" -u -m pip install \
+            --require-hashes -c constraints.txt cryptography; then
+        print_error "Could not install the signature verifier — aborting"
+        print_info "A host that cannot verify a required signature hard-stops."
         exit 1
     fi
-    if ! cosign verify-blob \
-        --bundle "$CONSTRAINTS_BUNDLE" \
-        --certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
-        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-        constraints.txt &>/dev/null; then
-        print_error "Constraints signature verification FAILED — aborting"
-        print_info "constraints.txt was not signed by Sthenos Security CI or was tampered with."
-        print_info "This file decides which dependency versions get installed."
+
+    # FULL verification: every root signature on the key list, both release
+    # signatures on the manifest, and the sha384 of every artifact we will
+    # act on. This is the gate — nothing above it was trusted alone.
+    VERIFY_ARTIFACTS=("$WHEEL_FILE" constraints.txt)
+    if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
+        VERIFY_ARTIFACTS+=("$VENDOR_ARCHIVE")
+    fi
+    VERIFY_ARGS=(
+        --expected-fingerprint "$REACHABLE_ROOT_FINGERPRINT"
+        --key-list key-list.json
+        --manifest reachable-signed-manifest.json
+        --manifest-sig reachable-signed-manifest.json.p384.sig
+        --manifest-sig reachable-signed-manifest.json.mldsa87.sig
+    )
+    for s in "${KEY_SIGS[@]}"; do
+        VERIFY_ARGS+=(--key-sig "$s")
+    done
+    for a in "${VERIFY_ARTIFACTS[@]}"; do
+        VERIFY_ARGS+=(--artifact "$a")
+    done
+    if ! "$HOME/.reachable/venv/bin/python" verify_release_manifest.py "${VERIFY_ARGS[@]}"; then
+        print_error "Release verification FAILED — aborting"
+        print_info "The release was not signed by both Sthenos Security release keys, or"
+        print_info "an artifact does not match the signed manifest. Report to"
+        print_info "info@sthenosec.com if this persists."
         exit 1
     fi
+    print_ok "Release verified (P-384 + ML-DSA-87, manifest bound)"
 
     CONSTRAINTS_MODE="hash"
-    print_ok "Dependency constraints verified (hash-pinned, Sigstore-signed)"
+    print_ok "Dependency constraints verified (hash-pinned, manifest-bound)"
 
-    # Download pre-compiled vendor wheels (C extensions: psutil, ruamel.yaml.clib)
-    # Built and signed in CI — no PyPI contact, no compiler needed on customer machine.
-    # Only published for Linux — macOS users who need source builds need Xcode CLT.
-    HAS_VENDOR_REMOTE=false
-    if [[ "$OS" == "linux" ]]; then
-        VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
-        if download_dist_artifact "Downloading vendor wheels" "$VENDOR_ARCHIVE" "$VENDOR_ARCHIVE"; then
-            # Verify vendor archive checksum (included in checksums.sha256 since CI signs it)
-            if ! grep -Fq "$VENDOR_ARCHIVE" checksums.sha256; then
-                print_error "No checksum entry for $VENDOR_ARCHIVE — aborting (supply chain risk)"
-                exit 1
-            fi
-            EXPECTED_VENDOR=$(grep -F "$VENDOR_ARCHIVE" checksums.sha256 | awk '{print $1}')
-            if command -v sha256sum &>/dev/null; then
-                ACTUAL_VENDOR=$(sha256sum "$VENDOR_ARCHIVE" | awk '{print $1}')
-            else
-                ACTUAL_VENDOR=$(shasum -a 256 "$VENDOR_ARCHIVE" | awk '{print $1}')
-            fi
-            if [[ "$EXPECTED_VENDOR" == "$ACTUAL_VENDOR" ]]; then
-                print_ok "Vendor archive checksum verified"
-            else
-                print_error "Vendor archive checksum FAILED — aborting"
-                exit 1
-            fi
-
-            VENDOR_BUNDLE="${VENDOR_ARCHIVE}.cosign.bundle"
-            if ! download_dist_artifact "Downloading vendor signature" "$VENDOR_BUNDLE" "$VENDOR_BUNDLE"; then
-                print_error "Could not fetch vendor cosign bundle — aborting (supply chain risk)"
-                print_info "Source: $(dist_artifact_source "$VENDOR_BUNDLE")"
-                exit 1
-            fi
-            if cosign verify-blob \
-                --bundle "$VENDOR_BUNDLE" \
-                --certificate-identity-regexp "$COSIGN_IDENTITY_REGEXP" \
-                --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-                "$VENDOR_ARCHIVE" &>/dev/null; then
-                print_ok "Vendor archive signature verified (Sigstore)"
-            else
-                print_error "Vendor archive signature FAILED — aborting"
-                exit 1
-            fi
-
-            mkdir -p vendor/
-            tar xzf "$VENDOR_ARCHIVE" -C vendor/
-            if ls vendor/*.whl 1>/dev/null 2>&1; then
-                _retag_vendor_wheels vendor/
-                HAS_VENDOR_REMOTE=true
-                print_ok "Vendor wheels prepared (built and signed in CI)"
-            fi
+    # Vendor archive was downloaded with the trust artifacts and its sha384
+    # verified against the manifest above. Unpack it.
+    if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
+        mkdir -p vendor/
+        tar xzf "$VENDOR_ARCHIVE" -C vendor/
+        if ls vendor/*.whl 1>/dev/null 2>&1; then
+            _retag_vendor_wheels vendor/
+            print_ok "Vendor wheels prepared (built and signed in CI)"
         else
-            print_info "No vendor wheels for this platform — dependencies from PyPI"
+            HAS_VENDOR_REMOTE=false
         fi
     fi
 
@@ -1677,7 +1637,7 @@ download_and_install() {
     fi
 
     # Hash-checking mode applies to every requirement being installed. The
-    # Reachable wheel is a local, already checksum/cosign-verified artifact, so
+    # Reachable wheel is a local, already manifest-verified artifact, so
     # install dependencies from constraints first, then install the wheel with
     # --no-deps. This keeps dependency artifact hashes enforced without making
     # pip demand a second hash line for the local wheel path.

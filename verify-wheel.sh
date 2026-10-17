@@ -41,41 +41,13 @@ echo "Verifying: $WHEEL"
 echo "Bundle:    $BUNDLE"
 echo ""
 
-# Read the signing identity from install.sh rather than restating it here.
-#
-# This script carried its own copy, and the copies had drifted: install.sh accepted
-# ANY repo in the organisation, this one accepted any workflow on any REF of
-# reach-core (including a branch build), and the design document specified a third
-# value. Three scripts, three answers to "who is allowed to have signed this" -- and
-# this is the one we hand customers to check our work, so it looked the most
-# authoritative while being unanchored.
-#
-# install.sh is the single definition because it must be self-contained: it is
-# downloaded standalone from the CDN and cannot source a sibling. This script lives
-# beside it in the repo, so it can source it.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ ! -f "$SCRIPT_DIR/install.sh" ]; then
-    echo "Error: install.sh not found beside this script; cannot resolve the signing identity"
-    exit 1
-fi
-# Read it in a CHILD shell, not by sourcing into this one. install.sh can call
-# `exit` while being sourced, and an `exit` in the current shell cannot be caught by
-# `|| true` -- it takes this script down with it, silently, before the verification
-# runs. Found by tracing rather than by reading: the script exited 1 having printed
-# only its banner, which looks indistinguishable from a quiet success if nobody
-# checks the exit code.
-COSIGN_IDENTITY_REGEXP="$(
-    REACHABLE_INSTALLER_SOURCE_ONLY=1 bash -c \
-        '. "$0" >/dev/null 2>&1; printf "%s" "${COSIGN_IDENTITY_REGEXP:-}"' \
-        "$SCRIPT_DIR/install.sh"
-)"
-if [ -z "${COSIGN_IDENTITY_REGEXP:-}" ]; then
-    # No fallback. Verifying against a guessed identity is worse than not verifying,
-    # because it prints a success message.
-    echo "Error: install.sh defines no COSIGN_IDENTITY_REGEXP; refusing to verify"
-    echo "against an unknown signer."
-    exit 1
-fi
+# The signing identity, as a literal. This script is the manual AUDIT path --
+# install.sh no longer runs cosign at all (docs/design/INSTALLER-ATTESTATION.md
+# item 8: the release manifest replaced it), so the constant cannot be read
+# from it anymore. The canonical definition lives in
+# reach-core: reach_agent/plugin_packages.py::COSIGN_IDENTITY_REGEXP, and
+# tests/reach_agent/test_cosign_identity_is_pinned.py sweeps every copy.
+COSIGN_IDENTITY_REGEXP='^https://github\.com/sthenos-security/reach-core/\.github/workflows/release[a-z0-9._-]*\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)?[0-9]*$'
 
 cosign verify-blob \
     --bundle "$BUNDLE" \
