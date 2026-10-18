@@ -155,12 +155,15 @@ resolve_python_bin() {
         minor="$(echo "$version" | cut -d. -f2)"
         if [[ "$major" -gt 3 || ( "$major" -eq 3 && "$minor" -ge 11 ) ]]; then
             # Containers like python:3.11 may expose multiple python3.x
-            # binaries, but only the one matching the image has the venv
-            # module installed. Prefer a candidate that can actually create
-            # a venv, falling back to the next one rather than failing later.
-            if ! "$path" -m venv --help >/dev/null 2>&1; then
+            # binaries, but only the one matching the image has ensurepip.
+            # Actually create a test venv; --help passes even without ensurepip.
+            local test_venv
+            test_venv="$(mktemp -d "${TMPDIR:-/tmp}/reachable-python-probe.XXXXXX")"
+            if ! "$path" -m venv "$test_venv" >/dev/null 2>&1; then
+                rm -rf "$test_venv"
                 continue
             fi
+            rm -rf "$test_venv"
             printf '%s\n' "$path"
             return 0
         fi
