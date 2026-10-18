@@ -10,7 +10,7 @@ REACHABLE wheels are signed using [Sigstore](https://sigstore.dev) cosign with k
 cosign verify-blob \
   --certificate reachable-<version>-<platform>.whl.crt \
   --signature reachable-<version>-<platform>.whl.sig \
-  --certificate-identity-regexp "https://github.com/sthenos-security/.*" \
+  --certificate-identity-regexp '^https://github\.com/sthenos-security/reach-core/\.github/workflows/release[a-z0-9._-]*\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)?[0-9]*$' \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   reachable-<version>-<platform>.whl
 ```
@@ -82,7 +82,7 @@ All macOS wheels are `universal2` — support both Intel and Apple Silicon.
 cosign verify-blob \
   --certificate reachable-<version>-<platform>.whl.crt \
   --signature reachable-<version>-<platform>.whl.sig \
-  --certificate-identity-regexp "https://github.com/sthenos-security/.*" \
+  --certificate-identity-regexp '^https://github\.com/sthenos-security/reach-core/\.github/workflows/release[a-z0-9._-]*\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)?[0-9]*$' \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --insecure-ignore-tlog \
   reachable-<version>-<platform>.whl
