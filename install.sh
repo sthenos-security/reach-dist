@@ -1889,7 +1889,17 @@ run_vibe_setup() {
         fi
     fi
 
-    local -a vibe_cmd=("$reachctl_bin" vibe install --repo "$workspace" --ci)
+    # `wire-workspace`, not `install`. Nothing is installed at this point --
+    # the wheel and the daemon are already on the machine. This configures one
+    # workspace. The old name made three separate callers each believe they
+    # had to run it (here, the plugin's setup.sh, and its repair.sh), so a
+    # workspace got wired up to three times and a failure in the last one
+    # read as a failed install.
+    #
+    # reach-core keeps `install` as a hidden forwarding alias precisely so
+    # THIS file can change first. Once this installer has propagated, that
+    # alias gets deleted -- see reach_agent/cli.py.
+    local -a vibe_cmd=("$reachctl_bin" vibe wire-workspace --repo "$workspace" --ci)
     local agent_name
     if ((${#VIBE_AGENTS[@]})); then
         for agent_name in "${VIBE_AGENTS[@]}"; do
