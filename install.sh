@@ -1903,6 +1903,8 @@ run_vibe_setup() {
     local agent_name
     if ((${#VIBE_AGENTS[@]})); then
         for agent_name in "${VIBE_AGENTS[@]}"; do
+            # wire-workspace expects the internal agent id (underscores, not hyphens)
+            agent_name="${agent_name//-/_}"
             vibe_cmd+=(--agent "$agent_name")
         done
     fi
