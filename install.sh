@@ -836,6 +836,51 @@ _verify_vendor_wheels_import() {
     done
 }
 
+# Does the managed venv actually work, or does it only have the right version
+# number? Called on the --update fast path, where nothing has been downloaded
+# yet, so this probes what is ALREADY on disk rather than a vendor directory.
+#
+# Returns non-zero (i.e. "reinstall it") when:
+#   * the .vendor-stamp is missing but the platform should have one -- an
+#     install that lost its stamp also lost doctor's record of what is present;
+#   * any package the stamp names cannot be imported by the venv python.
+#
+# Deliberately NOT a hardcoded module list: the stamp is the installer's own
+# record of what it placed, so this cannot drift from what shipped.
+_managed_venv_proves_itself() {
+    local py="$HOME/.reachable/venv/bin/python"
+    local stamp="$HOME/.reachable/venv/.vendor-stamp"
+    local pkg mod
+
+    [[ -x "$py" ]] || return 1
+
+    if [[ ! -f "$stamp" ]]; then
+        # No stamp. Either this install never had vendor wheels, or it lost the
+        # record. Both are worth repairing on an explicit --update, and the
+        # repair is the ordinary install path.
+        print_info "no vendor stamp found under the managed venv"
+        return 1
+    fi
+
+    while read -r pkg; do
+        [[ -n "$pkg" ]] || continue
+        # Package name -> import name. Only the ones whose spelling differs
+        # need a case; everything else imports under its own name with
+        # dashes normalised to underscores.
+        case "$pkg" in
+            yara-python) mod="yara" ;;
+            *)           mod="${pkg//-/_}" ;;
+        esac
+        if ! env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH \
+             "$py" -c "import $mod" >/dev/null 2>&1; then
+            print_info "vendor package '$pkg' is stamped but '$mod' does not import"
+            return 1
+        fi
+    done < "$stamp"
+
+    return 0
+}
+
 # Emit --only-binary flags for every package found in the vendor directory.
 # This tells pip "never build these from source" — if the vendor wheel isn't
 # compatible, pip fails fast instead of trying to compile C code without gcc.
@@ -1224,13 +1269,34 @@ handle_existing_install() {
             # without that path. Prove it under a clean env.
             if env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH \
                  "$HOME/.reachable/venv/bin/python" -c 'import sys' >/dev/null 2>&1; then
-                SKIP_RUNTIME_INSTALL=true
-                if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
-                    print_ok "reachable runtime is already current; verifying setup"
+                # "Already current" is a statement about the VERSION NUMBER. It
+                # is not a statement about whether the install works, and this
+                # branch used to say "verifying setup" while verifying nothing
+                # that could catch a broken venv. Measured 2026-10-19 on macOS:
+                # with yara-python removed and .vendor-stamp deleted -- the
+                # exact state a b230 macOS install is in -- `--update` printed
+                # "already current; verifying setup" and left every scan
+                # refusing. The cross-version path is fine because it takes the
+                # full install branch; this only bites a host broken AT the
+                # latest version, which is precisely when someone runs --update
+                # to repair it.
+                #
+                # So under --update the venv must now PROVE itself. The stamp is
+                # the installer's own record of which vendor packages it placed,
+                # so it is the honest thing to check against -- no guessing about
+                # which platforms carry which native wheel.
+                if [[ "$UPDATE_MODE" == true ]] \
+                   && ! _managed_venv_proves_itself; then
+                    print_warn "runtime reports $INSTALLED_VERSION but does not pass verification; reinstalling in place"
                 else
-                    print_ok "REACHABLE runtime is already current; verifying setup"
+                    SKIP_RUNTIME_INSTALL=true
+                    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+                        print_ok "reachable runtime is already current; venv verified"
+                    else
+                        print_ok "REACHABLE runtime is already current; venv verified"
+                    fi
+                    return
                 fi
-                return
             fi
             print_warn "existing venv python cannot start on this interpreter; rebuilding"
             rm -rf "$HOME/.reachable/venv"
