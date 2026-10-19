@@ -761,6 +761,57 @@ _retag_vendor_wheels() {
     done
 }
 
+# Prove the vendor wheels we just installed can actually be imported.
+#
+# _retag_vendor_wheels above renames a CI-built `linux_<arch>` wheel to
+# manylinux_2_17 so pip's resolver accepts it. That rename is a CLAIM about the
+# binary's glibc floor, and nothing had ever checked it. CI built yara-python on
+# ubuntu-24.04 (glibc 2.39), the rename said 2.17, pip believed the name, and
+# the install finished green on python:3.14-slim-bookworm (glibc 2.36) with a
+# yara.so that could not load:
+#
+#   ImportError: /lib/aarch64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found
+#
+# guarddog imports yara unconditionally, so preflight then recorded guarddog as
+# a failure and every `reachctl scan` refused to start -- with nothing on screen
+# connecting that to an install that had reported success. Measured 2026-10-19
+# on the published b230 aarch64 archive.
+#
+# An import is the only question that cannot be answered by a filename.
+_verify_vendor_wheels_import() {
+    local vendor_dir="$1"
+    local py="$HOME/.reachable/venv/bin/python"
+    local whl base mod err
+    for whl in "$vendor_dir"/*.whl; do
+        [ -f "$whl" ] || continue
+        base=$(basename "$whl")
+        case "$base" in
+            # Only wheels whose module imports STANDALONE can be probed here:
+            # vendor wheels go in before the dependency tree, so anything whose
+            # import reaches outside its own wheel reports a missing sibling as
+            # if it were a glibc failure.
+            #
+            # ruamel.yaml.clib is exactly that case and is deliberately absent:
+            # its payload is the top-level _ruamel_yaml.so, whose Cython init
+            # runs `init ruamel.yaml.clib._ruamel_yaml` and therefore needs the
+            # pure-python ruamel.yaml parent that arrives two steps later. It is
+            # also not the risk this probe exists for -- it comes from PyPI
+            # already carrying a real manylinux tag, while yara-python is the
+            # one built in CI whose tag we assign ourselves.
+            yara_python-*)       mod="yara" ;;
+            psutil-*)            mod="psutil" ;;
+            *)                   continue ;;
+        esac
+        if ! err=$("$py" -c "import $mod" 2>&1); then
+            print_error "Vendor wheel $base installed but cannot be imported:"
+            print_error "  $(echo "$err" | tail -1)"
+            print_error "This platform is below the wheel's real glibc floor."
+            print_error "Report to: info@sthenosec.com"
+            exit 1
+        fi
+    done
+}
+
 # Emit --only-binary flags for every package found in the vendor directory.
 # This tells pip "never build these from source" — if the vendor wheel isn't
 # compatible, pip fails fast instead of trying to compile C code without gcc.
@@ -1396,6 +1447,7 @@ download_and_install() {
                 print_error "Vendor wheel install failed — aborting"
                 exit 1
             fi
+            _verify_vendor_wheels_import "$WHEEL_DIR/vendor"
         fi
 
         # Install the main wheel.  --find-links lets pip resolve any remaining
@@ -1513,18 +1565,38 @@ print("\n".join(
         exit 1
     fi
 
-    # Vendor wheels (Linux only): fetched now so the manifest check covers the
-    # archive too. Optional — absence is not an attack, platforms differ.
+    # Vendor wheels: fetched now so the manifest check covers the archive too.
+    #
+    # This was `if [[ "$OS" == "linux" ]]` until 2026-10-19, and $OS is "darwin"
+    # on a Mac, so macOS never fetched the archive. release.yml has published
+    # vendor-cp3XX-macosx_universal2.tar.gz since 3230df97 (2026-10-18) and the
+    # installer still ignored it: measured on a clean b230 install through the
+    # public one-liner, macOS + Python 3.14 ended with no yara-python, guarddog
+    # unimportable, and every `reachctl scan` refusing to start.
+    #
+    # The archive's own name differs from $PLATFORM_TAG on macOS -- the wheel is
+    # tagged macosx_11_0_universal2, the vendor archive is macosx_universal2
+    # (release.yml:499) -- so lifting the OS gate alone would have 404'd and
+    # fallen into the same silence.
+    VENDOR_PLATFORM_TAG="$PLATFORM_TAG"
+    if [[ "$OS" == "darwin" ]]; then
+        VENDOR_PLATFORM_TAG="macosx_universal2"
+    fi
+
     HAS_VENDOR_REMOTE=false
-    VENDOR_ARCHIVE=""
-    if [[ "$OS" == "linux" ]]; then
-        VENDOR_ARCHIVE="vendor-${PY_TAG}-${PLATFORM_TAG}.tar.gz"
-        if download_dist_artifact "Downloading vendor wheels" "$VENDOR_ARCHIVE" "$VENDOR_ARCHIVE"; then
-            HAS_VENDOR_REMOTE=true
-        else
-            VENDOR_ARCHIVE=""
-            print_info "No vendor wheels for this platform — dependencies from PyPI"
-        fi
+    VENDOR_ARCHIVE="vendor-${PY_TAG}-${VENDOR_PLATFORM_TAG}.tar.gz"
+    if download_dist_artifact "Downloading vendor wheels" "$VENDOR_ARCHIVE" "$VENDOR_ARCHIVE"; then
+        HAS_VENDOR_REMOTE=true
+    else
+        # Not optional, and not survivable. The archive carries yara-python,
+        # which guarddog imports unconditionally and which publishes no cp314
+        # wheel on any platform; without it preflight records guarddog as a
+        # failure and the scanner refuses to start. Continuing here produced an
+        # install that looked successful and could not scan -- the failure has
+        # to land at install time, where the cause is still on screen.
+        print_error "Vendor wheels missing for this platform: $VENDOR_ARCHIVE"
+        print_error "Expected in release $WHEEL_VERSION. Report to: info@sthenosec.com"
+        exit 1
     fi
 
     # P-384 half via the host's own openssl: authenticates the key list, the
@@ -1627,7 +1699,11 @@ print("\n".join(
             _retag_vendor_wheels vendor/
             print_ok "Vendor wheels prepared (built and signed in CI)"
         else
-            HAS_VENDOR_REMOTE=false
+            # An archive that unpacks to no wheels is a broken release, not a
+            # platform without vendor wheels. Flipping HAS_VENDOR_REMOTE back
+            # to false here is the same silence the OS gate above produced.
+            print_error "Vendor archive $VENDOR_ARCHIVE contains no wheels — aborting"
+            exit 1
         fi
     fi
 
@@ -1644,6 +1720,7 @@ print("\n".join(
             print_error "Vendor wheel install failed — aborting"
             exit 1
         fi
+        _verify_vendor_wheels_import vendor/
     fi
 
     # Hash-checking mode applies to every requirement being installed. The
