@@ -761,6 +761,30 @@ _retag_vendor_wheels() {
     done
 }
 
+# The distinct package names a vendor directory provides.
+#
+# Needed because the vendor dir is NOT always one wheel per package. macOS is
+# the case that forced this: our own wheel is universal2, but psutil and
+# ruamel.yaml.clib publish no universal2 wheel for cp314 -- only separate
+# arm64 and x86_64 ones -- so the archive has to carry both and let pip choose.
+# Installing the directory by glob instead makes pip try EVERY file, and the
+# one for the other architecture is fatal:
+#
+#   ERROR: psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl is not a supported
+#          wheel on this platform
+#
+# Measured 2026-10-19 on an Intel macOS runner against b231. Naming the
+# packages instead lets pip pick the wheel that fits, and still fails loudly
+# when NONE fits -- which a "skip what doesn't match" loop would not.
+_vendor_package_names() {
+    local vendor_dir="$1" whl pkg
+    for whl in "$vendor_dir"/*.whl; do
+        [ -f "$whl" ] || continue
+        pkg=$(basename "$whl" | sed 's/-[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+        echo "$pkg"
+    done | sort -u
+}
+
 # Prove the vendor wheels we just installed can actually be imported.
 #
 # _retag_vendor_wheels above renames a CI-built `linux_<arch>` wheel to
@@ -1441,9 +1465,13 @@ download_and_install() {
         # alone won't install them.  Install ALL vendor wheels explicitly first.
         if [[ "$HAS_VENDOR" == true ]]; then
             # F-009b: vendor wheel install failure is meaningful — do not swallow (CWE-755)
+            # Intentional word-splitting: one argument per package name.
+            # shellcheck disable=SC2046
             if ! run_pip_with_retries "Installing vendor wheels" "$REACHABLE_PIP_ATTEMPTS" \
                 "$HOME/.reachable/venv/bin/python" -u -m pip install \
-                    --no-deps --force-reinstall "$WHEEL_DIR/vendor"/*.whl; then
+                    --no-deps --force-reinstall --no-index \
+                    --find-links "$WHEEL_DIR/vendor/" \
+                    $(_vendor_package_names "$WHEEL_DIR/vendor"); then
                 print_error "Vendor wheel install failed — aborting"
                 exit 1
             fi
@@ -1714,9 +1742,13 @@ print("\n".join(
     # Install ALL vendor wheels explicitly first, then install the main wheel.
     if [[ "$HAS_VENDOR_REMOTE" == true ]]; then
         # F-009b: vendor wheel install failure is meaningful — do not swallow (CWE-755)
+        # Intentional word-splitting: one argument per package name.
+        # shellcheck disable=SC2046
         if ! run_pip_with_retries "Installing vendor wheels" "$REACHABLE_PIP_ATTEMPTS" \
             "$HOME/.reachable/venv/bin/python" -u -m pip install \
-                --no-deps --force-reinstall vendor/*.whl; then
+                --no-deps --force-reinstall --no-index \
+                --find-links vendor/ \
+                $(_vendor_package_names vendor); then
             print_error "Vendor wheel install failed — aborting"
             exit 1
         fi
