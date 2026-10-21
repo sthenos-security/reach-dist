@@ -26,5 +26,8 @@ jobs:
       - name: Trust-root smoke
         run: bash ./test-installer-trust-root.sh
 
+      - name: Bootstrap recomputes the root fingerprint (forged key list refused)
+        run: bash ./test-installer-bootstrap-root-fingerprint.sh
+
       - name: Constraints signature smoke
         run: bash ./test-installer-constraints-signature.sh

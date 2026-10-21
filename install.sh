@@ -1405,8 +1405,21 @@ if not shutil.which("openssl"):
 
 kl_raw = (d / "key-list.json").read_bytes()
 kl = json.loads(kl_raw)
-if kl.get("root_fingerprint") != fingerprint:
-    die("key-list root fingerprint does not match the pinned value")
+# RECOMPUTE the fingerprint from the root keys this list names; never compare
+# the list's own claim. Comparing the claimed field let any key list that
+# copied the published string pass, signed by whatever roots it named. Same
+# rule as reachable/artifacts/key_list.py::load_and_verify.
+ROOT_ROLES = ("root-ecdsa-p384", "root-mldsa-87")
+roots = [k for k in kl.get("keys") or [] if k.get("role") in ROOT_ROLES]
+if not roots:
+    die("key list names no root keys")
+root_digests = sorted(hashlib.sha384(base64.b64decode(k["pubkey"])).hexdigest() for k in roots)
+recomputed = base64.b64encode(
+    hashlib.sha384("\n".join(root_digests).encode("ascii")).digest()).decode("ascii")
+if recomputed != fingerprint:
+    die("key-list root keys do not match the pinned fingerprint")
+if kl.get("root_fingerprint") != recomputed:
+    die("key-list states a root fingerprint that does not match its own keys")
 
 def der_int(x):
     b = x.to_bytes((x.bit_length() + 7) // 8 or 1, "big")
