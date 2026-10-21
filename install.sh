@@ -462,6 +462,7 @@ CUSTOM_VERSION=""
 CLEAN_DATA=false
 LOCAL_WHEEL=""
 AIRGAP_BUNDLE_INPUT=""
+AIRGAP_MIRROR_ROOT=""
 
 # REACHABLE has one install mode.  The continuous surface — daemon, agent
 # hooks, MCP registration, and generated skills/rules — is installed by
@@ -520,6 +521,12 @@ while [[ $# -gt 0 ]]; do
             # An air-gap bundle (tarball or unpacked directory). Installs offline
             # through the same verification as a release (AIRGAP-INSTALLER D36).
             AIRGAP_BUNDLE_INPUT="$2"
+            shift 2
+            ;;
+        --mirror-root)
+            # With --bundle: the transferred mirror directory holding the licence
+            # (license/current.jwt) and the signed intel snapshot.
+            AIRGAP_MIRROR_ROOT="$2"
             shift 2
             ;;
         --vibe-coding|--vibe)
@@ -696,6 +703,10 @@ if [[ -n "$AIRGAP_BUNDLE_INPUT" ]]; then
         exit 1
     fi
     REACHABLE_DIST_ROOT="$REACHABLE_AIRGAP_BUNDLE_ROOT"
+    if [[ -z "$AIRGAP_MIRROR_ROOT" || ! -d "$AIRGAP_MIRROR_ROOT" ]]; then
+        echo "Error: --bundle needs --mirror-root <dir>: the transferred mirror directory with the licence and the intel snapshot"
+        exit 1
+    fi
     # Later side installs (doctor: semgrep, guarddog) re-verify THIS bundle
     # through the product and install from its wheelhouse.
     export REACHABLE_AIRGAP_BUNDLE="$REACHABLE_AIRGAP_BUNDLE_ROOT"
@@ -2033,11 +2044,46 @@ print("\n".join(
 # -----------------------------------------------------------------------------
 # Verify Installation
 # -----------------------------------------------------------------------------
+# Enclave steps for --bundle, before doctor. Each is an existing reachctl verb
+# (AIRGAP-INSTALLER D15); this only sequences them. Without them doctor would
+# try to download scanners and a vulnerability DB the enclave cannot reach.
+bundle_enclave_setup() {
+    local reachctl_bin="$1"
+    local root="${REACHABLE_AIRGAP_BUNDLE_ROOT%/}"
+    print_step "Staging the bundle's scanners"
+    local tool archive
+    for tool in syft grype gitleaks actionlint; do
+        archive="$(ls "$root"/tools/"${tool}"_*_linux_*.tar.gz 2>/dev/null | head -1 || true)"
+        if [[ -z "$archive" ]]; then
+            print_error "The bundle carries no $tool archive under tools/ -- rebuild it"
+            exit 1
+        fi
+        "$reachctl_bin" doctor prestage "$tool" "$archive" || exit 1
+    done
+    print_step "Importing the licence"
+    "$reachctl_bin" token import "$AIRGAP_MIRROR_ROOT" || exit 1
+    # Asked with REACHABLE_OFFLINE removed: a scan in a new shell has no
+    # exported variable, so air-gap must hold from the installed licence alone.
+    if ! env -u REACHABLE_OFFLINE "$HOME/.reachable/venv/bin/python" -c \\
+        'import sys; from reachable.core.airgap import air_gap_enabled; sys.exit(0 if air_gap_enabled() else 1)'; then
+        print_error "The imported licence does not turn air-gap on (plan is not airgap)."
+        print_error "A scan in a new shell would be allowed to reach the internet. Import an airgap-plan licence."
+        exit 1
+    fi
+    print_step "Importing the signed intel snapshot"
+    "$reachctl_bin" airgap feed import --from "$AIRGAP_MIRROR_ROOT" || exit 1
+    print_step "Installing the venv scanners from the bundle (offline)"
+    "$reachctl_bin" doctor --yes || exit 1
+}
+
 verify_installation() {
     print_header "Verification"
-    
+
     VENV_REACHCTL="$HOME/.reachable/venv/bin/reachctl"
     mkdir -p "$REACHABLE_TMP_ROOT"
+    if bundle_mode_enabled; then
+        bundle_enclave_setup "$VENV_REACHCTL"
+    fi
 
     echo ""
     echo -e "${BOLD}Doctor:${NC}"
