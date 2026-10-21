@@ -29,5 +29,8 @@ jobs:
       - name: Bootstrap recomputes the root fingerprint (forged key list refused)
         run: bash ./test-installer-bootstrap-root-fingerprint.sh
 
+      - name: Air-gap bundle mode (extraction, root, version, wheel source)
+        run: bash ./test-installer-bundle-mode.sh
+
       - name: Constraints signature smoke
         run: bash ./test-installer-constraints-signature.sh

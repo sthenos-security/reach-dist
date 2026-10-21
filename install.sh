@@ -208,6 +208,10 @@ candidate_dist_source_enabled() {
 }
 
 resolve_version_from_candidate_dist() {
+    if bundle_mode_enabled; then
+        resolve_version_from_bundle
+        return $?
+    fi
     if [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
         local manifest="${REACHABLE_DIST_ROOT%/}/latest.json"
         if [[ -f "$manifest" ]]; then
@@ -343,9 +347,66 @@ release_tag_for_version() {
     printf 'v%s\n' "$version"
 }
 
+# -----------------------------------------------------------------------------
+# Air-gap bundle mode (AIRGAP-INSTALLER D36): the bundle is a release in scope
+# reachable-airgap-bundle, so it installs through THIS installer and THIS
+# verification -- the bundle directory is the dist root, nothing is fetched,
+# and pip never reaches an index.
+# -----------------------------------------------------------------------------
+REACHABLE_AIRGAP_BUNDLE_ROOT="${REACHABLE_AIRGAP_BUNDLE_ROOT:-}"
+BUNDLE_MANIFEST_NAME="reachable-signed-manifest.json"
+BUNDLE_SCOPE="reachable-airgap-bundle"
+
+bundle_mode_enabled() {
+    [[ -n "${REACHABLE_AIRGAP_BUNDLE_ROOT:-}" ]]
+}
+
+# Extract a bundle tarball refusing anything but regular files and
+# directories, absolute names and parent traversal (AIRGAP-INSTALLER C22),
+# BEFORE a single member lands on disk.
+extract_bundle_archive() {
+    local archive="$1" dest="$2"
+    python3 -I - "$archive" "$dest" <<'BUNDLE_PY'
+import sys, tarfile
+archive, dest = sys.argv[1], sys.argv[2]
+with tarfile.open(archive, "r:*") as tar:
+    members = tar.getmembers()
+    bad = [m.name for m in members
+           if not (m.isfile() or m.isdir()) or m.name.startswith("/") or ".." in m.name.split("/")]
+    if bad:
+        sys.exit(f"bundle archive refused: unsafe member(s) {bad[:3]}")
+    tar.extractall(dest, members=members, filter="data")
+BUNDLE_PY
+}
+
+# The bundle root is the directory holding the bundle manifest: the given
+# directory, or its single child (a tarball packed with a top-level folder).
+locate_bundle_root() {
+    local dir="$1"
+    if [[ -f "$dir/$BUNDLE_MANIFEST_NAME" ]]; then
+        printf '%s\n' "$dir"
+        return 0
+    fi
+    local children=("$dir"/*/)
+    if [[ ${#children[@]} -eq 1 && -f "${children[0]%/}/$BUNDLE_MANIFEST_NAME" ]]; then
+        printf '%s\n' "${children[0]%/}"
+        return 0
+    fi
+    return 1
+}
+
+# Names only: the version picks file names before verification; the signed
+# manifest then binds every byte of those files.
+resolve_version_from_bundle() {
+    python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get("version"); print(v) if v else sys.exit(1)' \
+        "${REACHABLE_AIRGAP_BUNDLE_ROOT%/}/$BUNDLE_MANIFEST_NAME"
+}
+
 dist_artifact_source() {
     local name="$1"
-    if [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
+    if bundle_mode_enabled && [[ "$name" == *.whl ]]; then
+        printf '%s/wheelhouse/%s\n' "${REACHABLE_AIRGAP_BUNDLE_ROOT%/}" "$name"
+    elif [[ -n "${REACHABLE_DIST_ROOT:-}" ]]; then
         printf '%s/%s\n' "${REACHABLE_DIST_ROOT%/}" "$name"
     elif [[ -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
         printf '%s/%s\n' "${REACHABLE_DIST_BASE_URL%/}" "$name"
@@ -400,6 +461,7 @@ UPDATE_MODE=false
 CUSTOM_VERSION=""
 CLEAN_DATA=false
 LOCAL_WHEEL=""
+AIRGAP_BUNDLE_INPUT=""
 
 # REACHABLE has one install mode.  The continuous surface — daemon, agent
 # hooks, MCP registration, and generated skills/rules — is installed by
@@ -452,6 +514,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --wheel|-w)
             LOCAL_WHEEL="$2"
+            shift 2
+            ;;
+        --bundle)
+            # An air-gap bundle (tarball or unpacked directory). Installs offline
+            # through the same verification as a release (AIRGAP-INSTALLER D36).
+            AIRGAP_BUNDLE_INPUT="$2"
             shift 2
             ;;
         --vibe-coding|--vibe)
@@ -606,6 +674,31 @@ fi
 if [[ -n "${LOCAL_WHEEL:-}" ]] && candidate_dist_source_enabled; then
     echo "Error: --wheel cannot be combined with candidate dist source options"
     exit 1
+fi
+
+if [[ -n "$AIRGAP_BUNDLE_INPUT" ]]; then
+    if [[ -n "${LOCAL_WHEEL:-}" ]] || candidate_dist_source_enabled; then
+        echo "Error: --bundle cannot be combined with --wheel, --dist-root or --dist-base-url"
+        exit 1
+    fi
+    if [[ -f "$AIRGAP_BUNDLE_INPUT" ]]; then
+        mkdir -p "${REACHABLE_TMP_ROOT:-${TMPDIR:-/tmp}}"
+        _bundle_unpacked="$(mktemp -d "${REACHABLE_TMP_ROOT:-${TMPDIR:-/tmp}}/bundle.XXXXXX")"
+        extract_bundle_archive "$AIRGAP_BUNDLE_INPUT" "$_bundle_unpacked" || exit 1
+        AIRGAP_BUNDLE_INPUT="$_bundle_unpacked"
+    fi
+    if [[ ! -d "$AIRGAP_BUNDLE_INPUT" ]]; then
+        echo "Error: --bundle $AIRGAP_BUNDLE_INPUT is neither a bundle archive nor a directory"
+        exit 1
+    fi
+    if ! REACHABLE_AIRGAP_BUNDLE_ROOT="$(locate_bundle_root "$(cd "$AIRGAP_BUNDLE_INPUT" && pwd)")"; then
+        echo "Error: no $BUNDLE_MANIFEST_NAME in $AIRGAP_BUNDLE_INPUT: not a release-chain air-gap bundle (AIRGAP-INSTALLER D36)"
+        exit 1
+    fi
+    REACHABLE_DIST_ROOT="$REACHABLE_AIRGAP_BUNDLE_ROOT"
+    # Later side installs (doctor: semgrep, guarddog) re-verify THIS bundle
+    # through the product and install from its wheelhouse.
+    export REACHABLE_AIRGAP_BUNDLE="$REACHABLE_AIRGAP_BUNDLE_ROOT"
 fi
 
 selector_looks_like_version() {
@@ -978,6 +1071,11 @@ retries = ${REACHABLE_PIP_RETRIES}
 disable-pip-version-check = true
 progress-bar = ${REACHABLE_PIP_PROGRESS_BAR}
 EOF
+    if bundle_mode_enabled; then
+        # Every pip call in this venv is offline by construction: the bundle's
+        # wheelhouse is the only index, now and for later side installs.
+        printf 'no-index = true\nfind-links = %s/wheelhouse\n' "${REACHABLE_AIRGAP_BUNDLE_ROOT%/}" >> "$venv_dir/pip.conf"
+    fi
     print_info "Pip config: $venv_dir/pip.conf"
 }
 
@@ -1692,7 +1790,11 @@ print("\n".join(
 
     HAS_VENDOR_REMOTE=false
     VENDOR_ARCHIVE="vendor-${PY_TAG}-${VENDOR_PLATFORM_TAG}.tar.gz"
-    if download_dist_artifact "Downloading vendor wheels" "$VENDOR_ARCHIVE" "$VENDOR_ARCHIVE"; then
+    if bundle_mode_enabled; then
+        # The bundle's wheelhouse carries the whole binary closure for this
+        # platform, side installs included, so there is no separate archive.
+        print_info "Air-gap bundle: binaries come from its wheelhouse"
+    elif download_dist_artifact "Downloading vendor wheels" "$VENDOR_ARCHIVE" "$VENDOR_ARCHIVE"; then
         HAS_VENDOR_REMOTE=true
     else
         # Not optional, and not survivable. The archive carries yara-python,
@@ -1738,8 +1840,10 @@ print("\n".join(
         exit 1
     fi
     configure_venv_pip_config
-    run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
-        "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
+    if ! bundle_mode_enabled; then
+        run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
+            "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
+    fi
 
     # constraints.txt was fetched with the trust artifacts and its sha384 was
     # already checked against the manifest by _bootstrap_openssl_verify. Its
@@ -1782,9 +1886,15 @@ print("\n".join(
     for s in "${KEY_SIGS[@]}"; do
         VERIFY_ARGS+=(--key-sig "$s")
     done
-    for a in "${VERIFY_ARTIFACTS[@]}"; do
-        VERIFY_ARGS+=(--artifact "$a")
-    done
+    if bundle_mode_enabled; then
+        # The bundle manifest binds the WHOLE tree: every file by relative
+        # path, nothing unlisted, and only for the air-gap bundle's scope.
+        VERIFY_ARGS+=(--artifact-root "$REACHABLE_AIRGAP_BUNDLE_ROOT" --expected-scope "$BUNDLE_SCOPE")
+    else
+        for a in "${VERIFY_ARTIFACTS[@]}"; do
+            VERIFY_ARGS+=(--artifact "$a")
+        done
+    fi
     if ! "$HOME/.reachable/venv/bin/python" verify_release_manifest.py "${VERIFY_ARGS[@]}"; then
         print_error "Release verification FAILED — aborting"
         print_info "The release was not signed by both Sthenos Security release keys, or"
@@ -1839,6 +1949,20 @@ print("\n".join(
     # install dependencies from constraints first, then install the wheel with
     # --no-deps. This keeps dependency artifact hashes enforced without making
     # pip demand a second hash line for the local wheel path.
+    if bundle_mode_enabled; then
+        # The signed lock IS the full closure -- Reachable, its dependencies and
+        # the side installs -- every entry pinned and hashed. --no-deps because
+        # the lock is complete (the builder proved it resolves); letting pip
+        # re-resolve breaks on 3.14, where guarddog declares pygit2<1.19.
+        if ! run_pip_with_retries "Installing from the bundle's signed lock" 1 \
+            "$HOME/.reachable/venv/bin/python" -u -m pip install --no-deps --require-hashes \
+                -r "$REACHABLE_AIRGAP_BUNDLE_ROOT/wheelhouse/requirements.lock"; then
+            exit 1
+        fi
+        print_ok "Installed offline from the bundle (hash-pinned, manifest-bound)"
+        configure_shell_path
+        return
+    fi
     if [[ "$CONSTRAINTS_MODE" == "hash" ]]; then
         if ! run_pip_with_retries "Installing hash-pinned dependencies" "$REACHABLE_PIP_ATTEMPTS" \
             "$HOME/.reachable/venv/bin/python" -u -m pip install --require-hashes -r constraints.txt; then
