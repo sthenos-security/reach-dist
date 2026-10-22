@@ -34,3 +34,14 @@ jobs:
 
       - name: Constraints signature smoke
         run: bash ./test-installer-constraints-signature.sh
+
+      # Python 3.11 ships pip 24.0, the oldest pip a supported CPython
+      # (3.11-3.14) brings. An air-gap install cannot upgrade pip, so the
+      # installer must work with it (b236 did not).
+      - name: Set up the oldest supported Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Signature verifier installs offline with the oldest pip
+        run: PYTHON=python3.11 bash ./test-installer-verifier-oldest-pip.sh

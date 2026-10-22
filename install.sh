@@ -364,6 +364,20 @@ bundle_mode_enabled() {
 # Extract a bundle tarball refusing anything but regular files and
 # directories, absolute names and parent traversal (AIRGAP-INSTALLER C22),
 # BEFORE a single member lands on disk.
+# The signature verifier's own closure (cryptography, cffi, pycparser), cut
+# from the signed constraints as a hash-pinned REQUIREMENTS file. Works with
+# every pip a supported CPython (3.11-3.14) ships: pip before 26 ignores the
+# hashes in a constraints file, so `-c constraints.txt cryptography` fails in
+# --require-hashes mode. Tested by test-installer-verifier-oldest-pip.sh.
+write_verifier_requirements() {
+    awk 'BEGIN { keep = 0 }
+         /^[A-Za-z0-9_.-]+==/ {
+             name = tolower($1); sub(/==.*/, "", name)
+             keep = (name == "cryptography" || name == "cffi" || name == "pycparser")
+         }
+         keep' "$1"
+}
+
 extract_bundle_archive() {
     local archive="$1" dest="$2"
     python3 -I - "$archive" "$dest" <<'BUNDLE_PY'
@@ -1872,9 +1886,21 @@ print("\n".join(
     # constraints — the P-384-authenticated channel delivering the ML-DSA
     # verifier, exactly the bootstrap §7.2 describes. No cryptography, no
     # install: §5.4 says a host that cannot verify hard-stops.
+    #
+    # As a REQUIREMENTS file cut from those constraints, not `-c constraints.txt
+    # cryptography`: pip before 26 ignores hashes in a constraints file and
+    # refuses the unpinned name in --require-hashes mode. A bundle install
+    # keeps the enclave image's own pip (no upgrade without an index), so the
+    # constraints form failed every air-gap install. If cryptography ever
+    # gains a dependency not listed here, pip stops on its missing hash.
+    write_verifier_requirements constraints.txt > verifier-requirements.txt
+    if ! grep -q "^cryptography==" verifier-requirements.txt; then
+        print_error "constraints.txt pins no cryptography — cannot install the signature verifier"
+        exit 1
+    fi
     if ! run_pip_with_retries "Installing signature verifier" "$REACHABLE_PIP_ATTEMPTS" \
         "$HOME/.reachable/venv/bin/python" -u -m pip install \
-            --require-hashes -c constraints.txt cryptography; then
+            --require-hashes -r verifier-requirements.txt; then
         print_error "Could not install the signature verifier — aborting"
         print_info "A host that cannot verify a required signature hard-stops."
         exit 1

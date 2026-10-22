@@ -54,8 +54,13 @@ grep -A6 'Release verification FAILED' "$INSTALLER" | grep -Fq 'exit 1' \
 
 # 6. The cryptography install that carries the ML-DSA verifier is itself
 #    hash-pinned via the manifest-authenticated constraints file.
-grep -Fq -- '--require-hashes -c constraints.txt cryptography' "$INSTALLER" \
-    || fail "cryptography is not installed hash-pinned from constraints.txt"
+#    A requirements file cut from it (write_verifier_requirements), since pip
+#    before 26 ignores hashes in a constraints file; see
+#    test-installer-verifier-oldest-pip.sh.
+grep -Fq -- 'write_verifier_requirements constraints.txt > verifier-requirements.txt' "$INSTALLER" \
+    || fail "the verifier requirements are not cut from constraints.txt"
+grep -Fq -- '--require-hashes -r verifier-requirements.txt' "$INSTALLER" \
+    || fail "cryptography is not installed hash-pinned"
 
 # 7. verify-wheel.sh -- the standalone customer audit script -- carries its own
 #    literal identity now that install.sh no longer defines one.
