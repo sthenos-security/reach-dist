@@ -2090,7 +2090,7 @@ bundle_enclave_setup() {
     "$reachctl_bin" token import "$AIRGAP_MIRROR_ROOT" || exit 1
     # Asked with REACHABLE_OFFLINE removed: a scan in a new shell has no
     # exported variable, so air-gap must hold from the installed licence alone.
-    if ! env -u REACHABLE_OFFLINE "$HOME/.reachable/venv/bin/python" -c \\
+    if ! env -u REACHABLE_OFFLINE "$HOME/.reachable/venv/bin/python" -I -c \
         'import sys; from reachable.core.airgap import air_gap_enabled; sys.exit(0 if air_gap_enabled() else 1)'; then
         print_error "The imported licence does not turn air-gap on (plan is not airgap)."
         print_error "A scan in a new shell would be allowed to reach the internet. Import an airgap-plan licence."

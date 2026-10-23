@@ -72,4 +72,23 @@ if locate_bundle_root "$WORK/old" >/dev/null; then
   fail "a pre-D36 bundle (no reachable-signed-manifest.json) was accepted"
 fi
 
+
+# 6. The licence check after `token import` fires. It never did: a doubled
+#    backslash ended the python line, so the next line ran as a command
+#    (exit 127), the `if !` read that as "air-gap on", and an install whose
+#    licence leaves air-gap off went through. Run the installer's own lines
+#    against a python that reports air-gap OFF; the refusal must fire.
+check="$(awk '/Asked with REACHABLE_OFFLINE removed/{f=1} f{print} f && /^    fi$/{exit}' "$ROOT_DIR/install.sh")"
+[[ -n "$check" ]] || fail "could not find the licence check in install.sh"
+fakehome="$WORK/home"; mkdir -p "$fakehome/.reachable/venv/bin"
+printf '#!/bin/sh\nexit 1\n' > "$fakehome/.reachable/venv/bin/python"
+chmod +x "$fakehome/.reachable/venv/bin/python"
+if out="$(HOME="$fakehome" bash -c "print_error() { echo \"\$*\"; }; $check" 2>&1)"; then
+  fail "a licence that leaves air-gap off was accepted: $out"
+fi
+[[ "$out" == *"does not turn air-gap on"* ]] || fail "the licence refusal did not fire: $out"
+printf '#!/bin/sh\nexit 0\n' > "$fakehome/.reachable/venv/bin/python"
+HOME="$fakehome" bash -c "print_error() { echo \"\$*\"; }; $check" >/dev/null 2>&1 \
+  || fail "an air-gap licence was refused"
+
 echo "PASS: install.sh bundle mode helpers"
