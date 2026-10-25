@@ -40,8 +40,8 @@ which one is not something any of them can tell you.
 
 | role | holder | protection |
 |---|---|---|
-| `root-ecdsa-p384` | YubiKey 37610824 (5C Nano), PIV slot 9C | non-exportable |
-| `root-ecdsa-p384` | YubiKey 37505073 (5C NFC), PIV slot 9C | non-exportable |
+| `root-ecdsa-p384` | YubiKey (5C Nano), PIV slot 9C | non-exportable |
+| `root-ecdsa-p384` | YubiKey (5C NFC), PIV slot 9C | non-exportable |
 | `root-mldsa-87` | offline encrypted file (FIPS 204, ML-DSA-87) | passphrase |
 
 The key-list policy is `all_of[root-ecdsa-p384, root-mldsa-87]`, so a P-384
