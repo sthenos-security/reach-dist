@@ -15,6 +15,7 @@
 #   5. Installs REACHABLE CLI (the handler ships inside the wheel)
 #   6. Creates a minimal Firecracker rootfs snapshot
 #   7. Prints the private key for you to copy to your CI runner
+#      (run interactively, not in a logged/CI session — see warning below)
 #
 # The detection logic (batch→bisect, .pth scanning, YARA rules, event
 # classification) is NOT in this script — it ships inside the reachable
@@ -413,6 +414,12 @@ print_summary() {
     echo -e "  Handler:    ${HANDLER_BIN} → reachctl detonation-host serve"
     echo -e "  Snapshots:  ${DETONATION_HOME}/snapshots"
     echo -e "  Jobs:       ${DETONATION_HOME}/jobs"
+    echo ""
+    warn "The block below is a private key. Do not run this script inside a"
+    warn "CI job, over a logged/recorded session, or anywhere stdout is"
+    warn "captured or persisted. Run it interactively on the host itself,"
+    warn "copy the key to your CI runner's secret store, then clear your"
+    warn "terminal scrollback."
     echo ""
     echo -e "${YELLOW}─── PRIVATE KEY (copy this to your CI runner) ───${NC}"
     echo ""
