@@ -515,6 +515,8 @@ NO_VIBE_REQUESTED_FLAG=""
 # Human-readable reason for the resolved surface, printed in the summary.
 VIBE_SURFACE_REASON="default"
 VIBE_WORKSPACE=""
+UNINSTALL_MODE=false
+ASSUME_YES=false
 VIBE_RUN_BASELINE=false
 VIBE_AGENTS=()
 VIBE_UI_URL=""
@@ -539,6 +541,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --clean)
             CLEAN_DATA=true
+            shift
+            ;;
+        --uninstall)
+            UNINSTALL_MODE=true
+            shift
+            ;;
+        --yes|-y)
+            ASSUME_YES=true
             shift
             ;;
         --wheel|-w)
@@ -608,6 +618,10 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --update, -u       Upgrade existing installation (backs up data)"
             echo "  --clean            Remove existing data before install"
+            echo "  --uninstall        Remove REACHABLE from this machine: agent plugins, MCP"
+            echo "                     server, daemon, and ~/.reachable including scan history"
+            echo "                     and credentials. Asks first; --yes skips the question."
+            echo "  --yes, -y          Answer yes to the --uninstall confirmation"
             echo "  --version, -v VER  Install specific version (e.g., 1.0.0b35)"
             echo "  --wheel, -w FILE   Install from local wheel file (skips download)"
             echo "  --dist-root DIR    Install from a local signed dist artifact directory"
@@ -2499,6 +2513,40 @@ print_success() {
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
+# `--uninstall`: the same removal as `reachable: uninstall --full`, for the
+# user who installed with curl and wants out the same way. Everything runs
+# through the installed reachctl (reach-core `reach_agent/cli.py uninstall
+# --full`, AGENT-INTEGRATION-UNIFIED-INSTALL-DESIGN.md "Two Uninstalls"); this
+# script only asks the question and names what is left when it cannot run.
+run_uninstall() {
+    local reachctl="$HOME/.reachable/venv/bin/reachctl"
+    local workspace
+    workspace="$(resolve_vibe_workspace)"
+    print_header "REACHABLE Uninstall"
+    if [[ ! -x "$reachctl" ]]; then
+        print_error "No REACHABLE runtime at $HOME/.reachable/venv; the uninstall runs through it."
+        if [[ -e "$HOME/.reachable" ]]; then
+            print_info "$HOME/.reachable exists without a runtime (an install that did not finish)."
+            print_info "Reinstall and run --uninstall again, or remove it by hand: rm -rf \"$HOME/.reachable\""
+        else
+            print_info "Nothing to uninstall."
+        fi
+        exit 1
+    fi
+    if [[ "$ASSUME_YES" != true ]]; then
+        echo "  This removes REACHABLE from this machine: agent plugins, MCP server, daemon,"
+        echo "  and $HOME/.reachable including scan history and credentials."
+        # F-008: read from /dev/tty so the question works inside curl | bash.
+        read -p "  Continue? [y/N] " -n 1 -r < /dev/tty
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Uninstall cancelled"
+            exit 0
+        fi
+    fi
+    "$reachctl" vibe uninstall --full --yes --workspace "$workspace"
+}
+
 main() {
     if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" && "$UPDATE_MODE" == true ]]; then
         print_header "reachable upgrade v${VERSION}"
@@ -2525,6 +2573,11 @@ main() {
 }
 
 if [[ "${REACHABLE_INSTALLER_SOURCE_ONLY:-}" != "1" ]]; then
+    if [[ "$UNINSTALL_MODE" == true ]]; then
+        # No install log: it would be written into the directory being removed.
+        run_uninstall
+        exit 0
+    fi
     setup_install_log
 
     if [[ "${REACHABLE_INSTALLER_VERIFY_ONLY:-}" == "1" ]]; then

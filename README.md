@@ -117,6 +117,20 @@ turn off the continuous surface** — only `--no-vibe` does that.
 surface. They are now redundant with the default, and every published agent
 plugin sends `--vibe`, so they will keep working.
 
+### Uninstall
+
+```bash
+curl -fsSL https://sthenosec.com/download/install.sh | bash -s -- --uninstall
+```
+
+Removes REACHABLE from the machine: agent plugins, user-level hooks, MCP
+registrations, the daemon, and `~/.reachable` including scan history and
+credentials. It asks first (`--yes` skips the question) and runs through the
+installed `reachctl vibe uninstall --full`, so it stops loudly at the first
+step it cannot complete rather than reporting a partial removal as done. To
+disconnect one repository and keep REACHABLE installed, ask your agent for
+`reachable: uninstall` instead.
+
 ### CI runners and other ephemeral hosts
 
 ```bash
