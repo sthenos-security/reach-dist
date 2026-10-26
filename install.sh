@@ -2211,6 +2211,19 @@ verify_installation() {
     fi
 }
 
+# A directory the daemon may be pointed at: anything except the user's home
+# directory and a filesystem root. Git is not required (see run_vibe_setup).
+vibe_workspace_is_wireable() {
+    local candidate
+    candidate="$(cd -- "$1" 2>/dev/null && pwd -P)" || return 1
+    [[ -n "$candidate" ]] || return 1
+    case "$candidate" in
+        /|"$(cd -- "$HOME" && pwd -P)") return 1 ;;
+    esac
+    [[ "$candidate" != "$(cd -- "$candidate/.." && pwd -P)" ]] || return 1
+    return 0
+}
+
 resolve_vibe_workspace() {
     if [[ -n "$VIBE_WORKSPACE" ]]; then
         echo "$VIBE_WORKSPACE"
@@ -2283,13 +2296,20 @@ run_vibe_setup() {
         return
     fi
 
-    if [[ ! -d "$workspace/.git" ]]; then
-        if ! command -v git &>/dev/null || ! git -C "$workspace" rev-parse --show-toplevel &>/dev/null; then
-            print_warn "Workspace does not look like a git repository; skipping reach-vibe setup"
-            print_info "Retry from your repo root with the installer:"
-            print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe"
-            return
-        fi
+    # A workspace does not need to be a git repository. Until 2026-10-26 a
+    # plain directory was skipped here with "does not look like a git
+    # repository" and the user told to retry from a repo root; a tester had to
+    # `git init` to get wired. The daemon, the scanner and the default
+    # `inplace` remediation mode handle non-git workspaces (reach-core
+    # `baseline_config.current_branch_state`); only remediation's branch and
+    # worktree modes need git, and they refuse by themselves. What the git
+    # check was really guarding against is wiring the whole home directory
+    # or the filesystem root as one workspace, so that is the check now.
+    if ! vibe_workspace_is_wireable "$workspace"; then
+        print_warn "Refusing to wire $workspace as a workspace: it is your home directory or a filesystem root"
+        print_info "Retry from the project directory, or name it:"
+        print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --repo /path/to/project"
+        return
     fi
 
     # `wire-workspace`, not `install`. Nothing is installed at this point --
