@@ -145,6 +145,20 @@ resolve_python_bin() {
         if [[ ! -x "$path" ]]; then
             continue
         fi
+        # Never run the installer on the managed venv's own python. The plugin's
+        # setup.sh exports PYTHON=$HOME/.reachable/venv/bin/python, and an
+        # install that rebuilds the venv `rm -rf`s it -- deleting the
+        # interpreter mid-run, so the next `"$PY_BIN" -m venv` fails and leaves
+        # no venv at all (reported on Linux 2026-10-26). Use the interpreter the
+        # venv was created from; a venv python that cannot start is skipped like
+        # any other unusable candidate.
+        case "$path" in
+            "$HOME/.reachable/venv/"*)
+                if ! path="$("$path" -c 'import sys; print(sys._base_executable)' 2>/dev/null)"; then
+                    continue
+                fi
+                ;;
+        esac
         local version
         version="$("$path" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)"
         if [[ -z "$version" ]]; then
@@ -987,6 +1001,10 @@ _managed_venv_proves_itself() {
         # dashes normalised to underscores.
         case "$pkg" in
             yara-python) mod="yara" ;;
+            # The wheel's top_level.txt is `_ruamel_yaml` (plus the `ruamel`
+            # namespace). `ruamel_yaml_clib` is not a module, so the default
+            # spelling failed every healthy Linux venv and --update deleted it.
+            ruamel-yaml-clib) mod="_ruamel_yaml" ;;
             *)           mod="${pkg//-/_}" ;;
         esac
         if ! env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH \
@@ -1420,8 +1438,9 @@ handle_existing_install() {
                     fi
                     return
                 fi
+            else
+                print_warn "existing venv python cannot start on this interpreter; rebuilding"
             fi
-            print_warn "existing venv python cannot start on this interpreter; rebuilding"
             rm -rf "$HOME/.reachable/venv"
         fi
 
