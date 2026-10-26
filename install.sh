@@ -948,30 +948,60 @@ _vendor_package_names() {
 # on the published b230 aarch64 archive.
 #
 # An import is the only question that cannot be answered by a filename.
+
+# The ONE vendor-package -> import-name map. `_verify_vendor_wheels_import`
+# and `_managed_venv_proves_itself` both read it. They used to carry a map
+# each; the second one guessed `${pkg//-/_}` for anything it did not list, so
+# `ruamel-yaml-clib` became `import ruamel_yaml_clib` (not a module -- the
+# wheel's top_level.txt is `_ruamel_yaml`), every healthy Linux venv failed the
+# --update probe, and the installer deleted it. Shipped b231..b243, 2026-10-19
+# to 2026-10-26. A package nobody registered is a loud failure, never a guess.
+#
+# Takes the package name as the stamp and the wheel spell it: lower-case,
+# dashes (`basename | sed 's/-[0-9].*//' | tr A-Z a-z | tr _ -`).
+_vendor_import_name() {
+    case "$1" in
+        yara-python)       echo "yara" ;;
+        psutil)            echo "psutil" ;;
+        ruamel-yaml-clib)  echo "_ruamel_yaml" ;;
+        *)
+            print_error "no import name registered for vendor package '$1'"
+            print_error "Add it to _vendor_import_name in install.sh. Never guess one here:"
+            print_error "a guessed name deleted every Linux venv on --update for a week."
+            return 2
+            ;;
+    esac
+}
+
+# Vendor wheels whose import reaches OUTSIDE their own wheel. They cannot be
+# probed standalone: vendor wheels go in before the dependency tree, so a
+# missing sibling reads as a glibc failure. ruamel.yaml.clib is the case:
+# its payload is the top-level _ruamel_yaml.so, whose Cython init runs
+# `init ruamel.yaml.clib._ruamel_yaml` and therefore needs the pure-python
+# ruamel.yaml parent that arrives two steps later. It is also not the risk
+# the standalone probe exists for -- it comes from PyPI already carrying a
+# real manylinux tag, while yara-python is the one built in CI whose tag we
+# assign ourselves. `_managed_venv_proves_itself` runs after the whole tree
+# is installed and DOES probe it.
+_vendor_import_needs_dependency_tree() {
+    case "$1" in
+        ruamel-yaml-clib) return 0 ;;
+        *)                return 1 ;;
+    esac
+}
+
 _verify_vendor_wheels_import() {
     local vendor_dir="$1"
     local py="$HOME/.reachable/venv/bin/python"
-    local whl base mod err
+    local whl base pkg mod err
     for whl in "$vendor_dir"/*.whl; do
         [ -f "$whl" ] || continue
         base=$(basename "$whl")
-        case "$base" in
-            # Only wheels whose module imports STANDALONE can be probed here:
-            # vendor wheels go in before the dependency tree, so anything whose
-            # import reaches outside its own wheel reports a missing sibling as
-            # if it were a glibc failure.
-            #
-            # ruamel.yaml.clib is exactly that case and is deliberately absent:
-            # its payload is the top-level _ruamel_yaml.so, whose Cython init
-            # runs `init ruamel.yaml.clib._ruamel_yaml` and therefore needs the
-            # pure-python ruamel.yaml parent that arrives two steps later. It is
-            # also not the risk this probe exists for -- it comes from PyPI
-            # already carrying a real manylinux tag, while yara-python is the
-            # one built in CI whose tag we assign ourselves.
-            yara_python-*)       mod="yara" ;;
-            psutil-*)            mod="psutil" ;;
-            *)                   continue ;;
-        esac
+        pkg=$(echo "$base" | sed 's/-[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+        if _vendor_import_needs_dependency_tree "$pkg"; then
+            continue
+        fi
+        mod=$(_vendor_import_name "$pkg") || exit 1
         if ! err=$("$py" -c "import $mod" 2>&1); then
             print_error "Vendor wheel $base installed but cannot be imported:"
             print_error "  $(echo "$err" | tail -1)"
@@ -1010,17 +1040,11 @@ _managed_venv_proves_itself() {
 
     while read -r pkg; do
         [[ -n "$pkg" ]] || continue
-        # Package name -> import name. Only the ones whose spelling differs
-        # need a case; everything else imports under its own name with
-        # dashes normalised to underscores.
-        case "$pkg" in
-            yara-python) mod="yara" ;;
-            # The wheel's top_level.txt is `_ruamel_yaml` (plus the `ruamel`
-            # namespace). `ruamel_yaml_clib` is not a module, so the default
-            # spelling failed every healthy Linux venv and --update deleted it.
-            ruamel-yaml-clib) mod="_ruamel_yaml" ;;
-            *)           mod="${pkg//-/_}" ;;
-        esac
+        # A stamped package with no registered import name aborts the
+        # installer. It must NOT `return 1`: that return means "delete and
+        # rebuild the venv", and this probe's one job is to never do that to
+        # a venv it cannot actually judge.
+        mod=$(_vendor_import_name "$pkg") || exit 1
         if ! env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH \
              "$py" -c "import $mod" >/dev/null 2>&1; then
             print_info "vendor package '$pkg' is stamped but '$mod' does not import"
@@ -1156,6 +1180,27 @@ uninstall_managed_reachable() {
         return 0
     fi
     "$venv_python" -u -m pip uninstall reachable -y
+}
+
+# The daemon runs on the managed venv's python. Rebuilding that venv under a
+# running daemon leaves it executing deleted code: on 2026-10-26 (Linux,
+# b243) pid 12423 survived two venv rebuilds, its log stayed empty, and
+# status was served by a process whose runtime no longer existed. Stop it
+# before the venv is touched; `reachctl vibe wire-workspace` (run_vibe_setup)
+# starts it again on the new runtime, and restarts a survivor by itself when
+# the runtime identity it recorded no longer matches (reach_agent/cli.py).
+stop_managed_daemon() {
+    local reachctl="$HOME/.reachable/venv/bin/reachctl"
+    if [[ ! -x "$reachctl" ]] || ! "$reachctl" --version >/dev/null 2>&1; then
+        print_warn "managed runtime cannot run; a daemon it started (if any) is left for setup to restart"
+        return 0
+    fi
+    print_info "stopping the daemon before the runtime changes"
+    if ! "$reachctl" vibe daemon stop; then
+        print_error "could not stop the running daemon; refusing to replace the runtime under it"
+        print_info "Stop it (reachctl vibe daemon stop) and rerun the installer."
+        exit 1
+    fi
 }
 
 run_pip_with_retries() {
@@ -1455,6 +1500,7 @@ handle_existing_install() {
             else
                 print_warn "existing venv python cannot start on this interpreter; rebuilding"
             fi
+            stop_managed_daemon
             rm -rf "$HOME/.reachable/venv"
         fi
 
@@ -1507,6 +1553,7 @@ handle_existing_install() {
             refresh_install_log=true
         fi
         print_step "Removing existing data (--clean)"
+        stop_managed_daemon
         rm -rf "$HOME/.reachable"
         if [[ "$refresh_install_log" == true ]]; then
             setup_install_log
@@ -1665,6 +1712,7 @@ download_and_install() {
         # Uninstall previous managed version
         if managed_reachable_version &> /dev/null; then
             print_step "Removing previous installation"
+            stop_managed_daemon
             uninstall_managed_reachable || true
             print_ok "Previous version removed"
         fi
@@ -1880,6 +1928,7 @@ print("\n".join(
     # Uninstall previous managed version
     if managed_reachable_version &> /dev/null; then
         print_step "Removing previous installation"
+        stop_managed_daemon
         uninstall_managed_reachable || true
         print_ok "Previous version removed"
     fi
