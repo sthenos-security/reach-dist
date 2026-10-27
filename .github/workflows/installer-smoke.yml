@@ -53,6 +53,18 @@ jobs:
       - name: A guard hold names the finding on the plugin path
         run: bash ./test-installer-vibe-setup-held.sh
 
+      - name: No GitHub token in any process argv
+        run: bash ./test-installer-no-token-in-argv.sh
+
+      - name: One version source (first-party manifest), bounded metadata requests
+        run: bash ./test-installer-version-source.sh
+
+      - name: doctor, selftest and wire-workspace are bounded; a failed selftest fails the install
+        run: bash ./test-installer-bounded-runtime.sh
+
+      - name: The install summary detects no CI
+        run: bash ./test-installer-summary-no-ci.sh
+
       # Python 3.11 ships pip 24.0, the oldest pip a supported CPython
       # (3.11-3.14) brings. An air-gap install cannot upgrade pip, so the
       # installer must work with it (b236 did not).

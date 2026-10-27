@@ -41,6 +41,18 @@ REACHABLE_DOWNLOAD_RETRIES="${REACHABLE_DOWNLOAD_RETRIES:-3}"
 REACHABLE_DOWNLOAD_RETRY_DELAY="${REACHABLE_DOWNLOAD_RETRY_DELAY:-5}"
 REACHABLE_DOWNLOAD_CONNECT_TIMEOUT="${REACHABLE_DOWNLOAD_CONNECT_TIMEOUT:-20}"
 REACHABLE_DOWNLOAD_MAX_TIME="${REACHABLE_DOWNLOAD_MAX_TIME:-600}"
+# Every network call and every runtime command this script runs is bounded.
+# Metadata requests (latest.json, the GitHub releases API) are small JSON;
+# REACHABLE_API_MAX_TIME bounds each one end to end.
+REACHABLE_API_MAX_TIME="${REACHABLE_API_MAX_TIME:-60}"
+# `reachctl doctor --full` installs scanners and downloads the vulnerability
+# database; the message printed before it promises "timeout: 10 minutes".
+REACHABLE_DOCTOR_MAX_TIME="${REACHABLE_DOCTOR_MAX_TIME:-600}"
+REACHABLE_SELFTEST_MAX_TIME="${REACHABLE_SELFTEST_MAX_TIME:-300}"
+# `reachctl vibe wire-workspace`; with --baseline it also runs the first
+# scan, which on a large repository takes far longer than the wiring itself.
+REACHABLE_WIRE_MAX_TIME="${REACHABLE_WIRE_MAX_TIME:-900}"
+REACHABLE_WIRE_BASELINE_MAX_TIME="${REACHABLE_WIRE_BASELINE_MAX_TIME:-14400}"
 REACHABLE_PIP_ATTEMPTS="${REACHABLE_PIP_ATTEMPTS:-3}"
 REACHABLE_PIP_RETRIES="${REACHABLE_PIP_RETRIES:-5}"
 REACHABLE_PIP_TIMEOUT="${REACHABLE_PIP_TIMEOUT:-120}"
@@ -63,12 +75,26 @@ SKIP_RUNTIME_INSTALL=false
 REPO="sthenos-security/reach-dist"
 RELEASES_API_TOKEN="${GITHUB_TOKEN:-${MCP_GITHUB_TOKEN:-}}"
 
+# One way to call the GitHub API: bounded by REACHABLE_API_MAX_TIME, and the
+# token (when there is one) passed on stdin via --config, never as an
+# argument (F-006a, CWE-214: argv is readable by every user through `ps`).
 github_curl() {
+    local -a bounded=(--connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT" --max-time "$REACHABLE_API_MAX_TIME")
     if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
         printf 'header = "Authorization: Bearer %s"\n' "${RELEASES_API_TOKEN}" \
-            | curl --config - "$@"
+            | curl --config - "${bounded[@]}" "$@"
     else
-        curl "$@"
+        curl "${bounded[@]}" "$@"
+    fi
+}
+
+# Whether a GitHub token is configured, as a word safe to put in argv. The
+# JSON parsers below need to know only that, never the token itself.
+api_token_state() {
+    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
+        echo "with-token"
+    else
+        echo "no-token"
     fi
 }
 
@@ -185,25 +211,6 @@ resolve_python_bin() {
     return 1
 }
 
-resolve_version_from_manifest() {
-    local response
-    response=$(curl -fsSL "$LATEST_MANIFEST_URL" 2>/dev/null || true)
-    if [[ -z "$response" ]]; then
-        return 1
-    fi
-
-    echo "$response" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-if not isinstance(data, dict) or not data.get('ok'):
-    sys.exit(1)
-version = str(data.get('version', '')).strip()
-if not version:
-    sys.exit(1)
-print(version)
-"
-}
-
 _manifest_version_from_json() {
     python3 -c "
 import sys, json
@@ -237,7 +244,8 @@ resolve_version_from_candidate_dist() {
 
     if [[ -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
         local response
-        response=$(curl -fsSL "${REACHABLE_DIST_BASE_URL%/}/latest.json" 2>/dev/null || true)
+        response=$(curl -fsSL --connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT" --max-time "$REACHABLE_API_MAX_TIME" \
+            "${REACHABLE_DIST_BASE_URL%/}/latest.json" 2>/dev/null || true)
         if [[ -z "$response" ]]; then
             return 1
         fi
@@ -248,67 +256,39 @@ resolve_version_from_candidate_dist() {
     return 1
 }
 
-# Resolve latest version from the first-party download manifest, then fall back
-# to the reach-dist GitHub releases API only if that manifest is unavailable.
-# Uses GITHUB_TOKEN or MCP_GITHUB_TOKEN on the GitHub fallback path.
+# The latest version comes from the first-party download manifest and nowhere
+# else. Until 2026-10-27 an unavailable manifest fell back to the newest entry
+# of the reach-dist GitHub releases API -- a second, unvetted version source
+# (INSTALLER-ATTESTATION §13.2: the version must not come from a pointer the
+# channel can rewrite). Whatever is chosen here is still verified against the
+# signed release manifest before anything is installed; this function only
+# refuses to pick the version from a second list.
 resolve_version() {
-    local manifest_version
-    manifest_version=$(resolve_version_from_manifest || true)
-    if [[ -n "$manifest_version" ]]; then
-        printf '%s\n' "$manifest_version"
-        return 0
+    local body err
+    body="$(mktemp "${TMPDIR:-/tmp}/reachable-latest.XXXXXX")"
+    err="$(mktemp "${TMPDIR:-/tmp}/reachable-latest-err.XXXXXX")"
+    if ! curl -fsSL --connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT" --max-time "$REACHABLE_API_MAX_TIME" \
+            -o "$body" "$LATEST_MANIFEST_URL" 2>"$err"; then
+        echo "Error: could not fetch the release manifest ${LATEST_MANIFEST_URL}: $(tr '\n' ' ' < "$err")" >&2
+        echo "  No other version source is used. Retry when it is reachable, or pin one: --version <version>" >&2
+        rm -f "$body" "$err"
+        return 1
     fi
-
-    local api_url="https://api.github.com/repos/${REPO}/releases"
-    local response
-
-    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
-        # F-006a: pass token via --config stdin, not CLI args (CWE-214)
-        response=$(github_curl -sL "$api_url")
-    else
-        response=$(curl -sL "$api_url")
+    if ! _manifest_version_from_json < "$body"; then
+        echo "Error: the release manifest ${LATEST_MANIFEST_URL} names no version (expected {\"ok\": true, \"version\": ...})" >&2
+        rm -f "$body" "$err"
+        return 1
     fi
-
-    echo "$response" | python3 -c "
-import sys, json, os
-data = json.load(sys.stdin)
-if isinstance(data, dict):
-    msg = data.get('message', 'unknown error')
-    has_token = bool(os.environ.get('GITHUB_TOKEN','') or os.environ.get('MCP_GITHUB_TOKEN',''))
-    if 'rate limit' in msg.lower():
-        if has_token:
-            sys.stderr.write('Error: GitHub API rate limit exceeded even with GITHUB_TOKEN or MCP_GITHUB_TOKEN.\n')
-            sys.stderr.write('  Your token may be invalid or scoped incorrectly.\n')
-        else:
-            sys.stderr.write('Error: GitHub API rate limit exceeded (unauthenticated).\n')
-            sys.stderr.write('  Fix option 1 — set a token and retry:\n')
-            sys.stderr.write('    export GITHUB_TOKEN=\"your_token\"\n')
-            sys.stderr.write('    # or: export MCP_GITHUB_TOKEN=\"your_token\"\n')
-            sys.stderr.write('    curl -fsSL https://sthenosec.com/download/install.sh | bash\n')
-            sys.stderr.write('  Fix option 2 — wait ~1 hour for the rate limit to reset, then retry.\n')
-    else:
-        sys.stderr.write('Error resolving latest version: GitHub API: ' + msg + '\n')
-    sys.exit(1)
-if not isinstance(data, list) or not data:
-    sys.stderr.write('Error resolving latest version: no releases found\n')
-    sys.exit(1)
-tag = data[0].get('tag_name', '')
-if not tag:
-    sys.stderr.write('Error resolving latest version: missing tag_name\n')
-    sys.exit(1)
-print(tag.lstrip('v'))
-" GITHUB_TOKEN="${GITHUB_TOKEN:-}" MCP_GITHUB_TOKEN="${MCP_GITHUB_TOKEN:-}"
+    rm -f "$body" "$err"
 }
 
 list_releases() {
     local api_url="https://api.github.com/repos/${REPO}/releases"
     local response
 
-    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
-        # F-006a: pass token via --config stdin, not CLI args (CWE-214)
-        response=$(github_curl -sL "$api_url")
-    else
-        response=$(curl -sL "$api_url")
+    if ! response=$(github_curl -sL "$api_url"); then
+        echo "Error: GitHub API request failed or timed out after ${REACHABLE_API_MAX_TIME}s: $api_url" >&2
+        exit 1
     fi
 
     # Check installed version
@@ -778,15 +758,13 @@ PY
 )"
     api_url="https://api.github.com/repos/${REPO}/releases/tags/${encoded_tag}"
 
-    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
-        response=$(github_curl -sL "$api_url")
-    else
-        response=$(curl -sL "$api_url")
+    if ! response=$(github_curl -sL "$api_url"); then
+        echo "Error: GitHub API request failed or timed out after ${REACHABLE_API_MAX_TIME}s: $api_url" >&2
+        return 1
     fi
 
     echo "$response" | python3 -c "
 import json
-import os
 import re
 import sys
 
@@ -796,7 +774,7 @@ if not isinstance(data, dict):
     sys.exit(1)
 if data.get('message') and not data.get('tag_name'):
     msg = str(data.get('message', 'unknown error'))
-    has_token = bool(os.environ.get('GITHUB_TOKEN', '') or os.environ.get('MCP_GITHUB_TOKEN', ''))
+    has_token = sys.argv[2] == 'with-token'
     if 'rate limit' in msg.lower():
         if has_token:
             sys.stderr.write('Error: GitHub API rate limit exceeded even with GITHUB_TOKEN or MCP_GITHUB_TOKEN.\\n')
@@ -824,7 +802,7 @@ if version and re.match(r'^v?[0-9]+(\\.[0-9]+){2}([A-Za-z0-9._-]+)?$', version):
 
 sys.stderr.write('Error resolving release version for tag ' + sys.argv[1] + ': no reachable wheel assets found\\n')
 sys.exit(1)
-" "$tag" GITHUB_TOKEN="${GITHUB_TOKEN:-}" MCP_GITHUB_TOKEN="${MCP_GITHUB_TOKEN:-}"
+" "$tag" "$(api_token_state)"
 }
 
 apply_version_selection() {
@@ -859,10 +837,13 @@ apply_version_selection() {
                 exit 1
             fi
         else
-            VERSION=$(resolve_version)
+            # resolve_version has already said why, on stderr.
+            if ! VERSION=$(resolve_version); then
+                exit 1
+            fi
         fi
         if [[ -z "$VERSION" ]]; then
-            echo "Error: could not resolve latest version from ${REPO}"
+            echo "Error: could not resolve the latest version from ${LATEST_MANIFEST_URL}"
             exit 1
         fi
         WHEEL_VERSION="$VERSION"
@@ -2196,6 +2177,44 @@ bundle_enclave_setup() {
     "$reachctl_bin" doctor --yes || exit 1
 }
 
+# Run a command with a wall-clock limit, portably: macOS has no `timeout(1)`.
+# The command runs in its own process group so the whole tree (doctor starts
+# scanner downloads) is stopped at the limit; exit 124 and a message name the
+# command and the limit. Output is inherited, not captured.
+run_bounded() {
+    local limit="$1"
+    shift
+    "$PY_BIN" -I -c '
+import os, signal, subprocess, sys
+
+limit = int(sys.argv[1])
+cmd = sys.argv[2:]
+proc = subprocess.Popen(cmd, start_new_session=True)
+
+
+def stop():
+    os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+
+
+try:
+    rc = proc.wait(timeout=limit)
+except subprocess.TimeoutExpired:
+    stop()
+    shown = [os.path.basename(cmd[0])] + cmd[1:3]
+    sys.stderr.write("timed out after %d s: %s\n" % (limit, " ".join(shown)))
+    sys.exit(124)
+except KeyboardInterrupt:
+    stop()
+    raise
+sys.exit(rc if rc >= 0 else 128 - rc)
+' "$limit" "$@"
+}
+
 verify_installation() {
     print_header "Verification"
 
@@ -2213,7 +2232,7 @@ verify_installation() {
         local doctor_log
         doctor_log="$(mktemp "$REACHABLE_TMP_ROOT/doctor.XXXXXX")"
         print_info "Doctor started"
-        if "$VENV_REACHCTL" doctor --full > "$doctor_log" 2>&1; then
+        if run_bounded "$REACHABLE_DOCTOR_MAX_TIME" "$VENV_REACHCTL" doctor --full > "$doctor_log" 2>&1; then
             if [[ -n "${INSTALL_LOG:-}" ]]; then
                 {
                     echo ""
@@ -2236,7 +2255,7 @@ verify_installation() {
         fi
         rm -f "$doctor_log"
     else
-        if ! "$VENV_REACHCTL" doctor --full 2>&1 | sed 's/^/  /'; then
+        if ! run_bounded "$REACHABLE_DOCTOR_MAX_TIME" "$VENV_REACHCTL" doctor --full 2>&1 | sed 's/^/  /'; then
             print_error "Verification failed: reachctl doctor --full did not complete successfully"
             exit 1
         fi
@@ -2246,14 +2265,15 @@ verify_installation() {
     echo -e "${BOLD}Self-test:${NC}"
     print_info "Selftest started"
     if [[ "${REACHABLE_INSTALLER_VERBOSE_SELFTEST:-0}" == "1" ]]; then
-        if "$VENV_REACHCTL" selftest 2>&1 | sed 's/^/  /'; then
+        if run_bounded "$REACHABLE_SELFTEST_MAX_TIME" "$VENV_REACHCTL" selftest 2>&1 | sed 's/^/  /'; then
             print_ok "Selftest passed"
         else
-            print_warn "Selftest failed (non-fatal)"
+            print_error "Verification failed: reachctl selftest did not pass (output above)"
+            exit 1
         fi
     else
         selftest_log="$(mktemp "$REACHABLE_TMP_ROOT/selftest.XXXXXX")"
-        if "$VENV_REACHCTL" selftest --quiet > "$selftest_log" 2>&1; then
+        if run_bounded "$REACHABLE_SELFTEST_MAX_TIME" "$VENV_REACHCTL" selftest --quiet > "$selftest_log" 2>&1; then
             if [[ -n "${INSTALL_LOG:-}" ]]; then
                 {
                     echo ""
@@ -2270,7 +2290,16 @@ verify_installation() {
                     cat "$selftest_log"
                 } >> "$INSTALL_LOG"
             fi
-            print_warn "Selftest failed (non-fatal; see $INSTALL_LOG)"
+            # A runtime that fails its own selftest is not installed. Until
+            # 2026-10-27 this warned "non-fatal" and the install reported
+            # success over it.
+            print_error "Verification failed: reachctl selftest did not pass:"
+            tail -20 "$selftest_log" | sed 's/^/    /' >&2
+            if [[ -n "${INSTALL_LOG:-}" ]]; then
+                print_info "Full output: $INSTALL_LOG"
+            fi
+            rm -f "$selftest_log"
+            exit 1
         fi
         rm -f "$selftest_log"
     fi
@@ -2415,8 +2444,10 @@ run_vibe_setup() {
             vibe_cmd+=(--agent "$agent_name")
         done
     fi
+    local wire_limit="$REACHABLE_WIRE_MAX_TIME"
     if [[ "$VIBE_RUN_BASELINE" == true ]]; then
         vibe_cmd+=(--baseline-scan)
+        wire_limit="$REACHABLE_WIRE_BASELINE_MAX_TIME"
     fi
 
     if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
@@ -2424,7 +2455,7 @@ run_vibe_setup() {
         vibe_log="$(mktemp "$REACHABLE_TMP_ROOT/vibe-install.XXXXXX")"
         print_info "Workspace wiring started"
         local vibe_rc=0
-        "${vibe_cmd[@]}" > "$vibe_log" 2>&1 || vibe_rc=$?
+        run_bounded "$wire_limit" "${vibe_cmd[@]}" > "$vibe_log" 2>&1 || vibe_rc=$?
         if [[ -n "${INSTALL_LOG:-}" ]]; then
             {
                 echo ""
@@ -2454,7 +2485,7 @@ run_vibe_setup() {
             print_info "Retry later with: ${vibe_cmd[*]}"
         fi
         rm -f "$vibe_log"
-    elif "${vibe_cmd[@]}"; then
+    elif run_bounded "$wire_limit" "${vibe_cmd[@]}"; then
         print_ok "reach-vibe installed for $workspace"
         local ui_output
         ui_output="$("$reachctl_bin" vibe ui --repo "$workspace" --no-open 2>/dev/null || true)"
@@ -2505,9 +2536,10 @@ print_success() {
     if [[ "$summary_mode" == "compact" ]]; then
         compact_success=true
     elif [[ "$summary_mode" == "auto" ]]; then
-        if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
-            compact_success=true
-        elif [[ "$ENABLE_VIBE_CODING" == true ]] && ((${#VIBE_AGENTS[@]} > 0)); then
+        # No CI check here: this script detects no CI (see ENABLE_VIBE_CODING
+        # above; SINGLE-INSTALL-MODE). A pipeline that wants the short form
+        # sets REACHABLE_INSTALLER_SUMMARY=compact.
+        if [[ "$ENABLE_VIBE_CODING" == true ]] && ((${#VIBE_AGENTS[@]} > 0)); then
             compact_success=true
         fi
     fi

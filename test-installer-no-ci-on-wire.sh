@@ -17,7 +17,7 @@ trap 'rm -rf "$WORK"' EXIT
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 FUNCS="$WORK/funcs.sh"
-for fn in vibe_workspace_is_wireable resolve_vibe_workspace announce_vibe_surface run_vibe_setup; do
+for fn in vibe_workspace_is_wireable resolve_vibe_workspace announce_vibe_surface run_vibe_setup run_bounded; do
   sed -n "/^${fn}() {/,/^}/p" "$ROOT_DIR/install.sh" >> "$FUNCS"
   grep -q "^${fn}() {" "$FUNCS" || fail "could not extract ${fn}"
 done
@@ -34,6 +34,9 @@ ENABLE_VIBE_CODING=true
 VIBE_SURFACE_REASON="--vibe"
 VIBE_AGENTS=(claude-code)
 VIBE_RUN_BASELINE=false
+PY_BIN="$(command -v python3)"
+REACHABLE_WIRE_MAX_TIME=900
+REACHABLE_WIRE_BASELINE_MAX_TIME=14400
 VIBE_SETUP_FAILED=""
 EOS
 
