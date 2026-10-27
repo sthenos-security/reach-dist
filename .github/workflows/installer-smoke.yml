@@ -44,6 +44,9 @@ jobs:
       - name: Daemon is stopped before every runtime removal
         run: bash ./test-installer-daemon-stop.sh
 
+      - name: A workspace that could not be wired is exit 1, never "success"
+        run: bash ./test-installer-vibe-setup-exit.sh
+
       # Python 3.11 ships pip 24.0, the oldest pip a supported CPython
       # (3.11-3.14) brings. An air-gap install cannot upgrade pip, so the
       # installer must work with it (b236 did not).

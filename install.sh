@@ -516,6 +516,10 @@ NO_VIBE_REQUESTED_FLAG=""
 VIBE_SURFACE_REASON="default"
 VIBE_WORKSPACE=""
 UNINSTALL_MODE=false
+# Set by run_vibe_setup when the workspace could not be wired; main exits 1 on it.
+# Until 2026-10-27 every such path printed a warning and the installer still
+# exited 0, which the plugin bootstrap read as "installed and wired".
+VIBE_SETUP_FAILED=""
 ASSUME_YES=false
 VIBE_RUN_BASELINE=false
 VIBE_AGENTS=()
@@ -2347,6 +2351,7 @@ run_vibe_setup() {
 
     if [[ ! -x "$reachctl_bin" ]]; then
         print_warn "reachctl binary not found after install; skipping reach-vibe setup"
+        VIBE_SETUP_FAILED="reachctl binary not found after install"
         print_info "Retry with the installer from your repo root:"
         print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --repo /path/to/repo"
         return
@@ -2354,6 +2359,7 @@ run_vibe_setup() {
 
     if [[ ! -d "$workspace" ]]; then
         print_warn "Workspace not found: $workspace"
+        VIBE_SETUP_FAILED="workspace not found: $workspace"
         print_info "Retry with the installer and an explicit repo path:"
         print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --repo /path/to/repo"
         return
@@ -2370,6 +2376,7 @@ run_vibe_setup() {
     # or the filesystem root as one workspace, so that is the check now.
     if ! vibe_workspace_is_wireable "$workspace"; then
         print_warn "Refusing to wire $workspace as a workspace: it is your home directory or a filesystem root"
+        VIBE_SETUP_FAILED="refused to wire $workspace (home directory or filesystem root)"
         print_info "Retry from the project directory, or name it:"
         print_info "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --vibe --repo /path/to/project"
         return
@@ -2426,6 +2433,7 @@ run_vibe_setup() {
                 } >> "$INSTALL_LOG"
             fi
             print_warn "reach-vibe setup failed, but reachable itself is installed (see $INSTALL_LOG)"
+            VIBE_SETUP_FAILED="reachctl vibe wire-workspace exited non-zero (see $INSTALL_LOG)"
             print_info "Retry later with: ${vibe_cmd[*]}"
         fi
         rm -f "$vibe_log"
@@ -2439,6 +2447,7 @@ run_vibe_setup() {
         fi
     else
         print_warn "reach-vibe setup failed, but REACHABLE itself is installed"
+        VIBE_SETUP_FAILED="reachctl vibe wire-workspace exited non-zero (see $INSTALL_LOG)"
         print_info "Retry later with: ${vibe_cmd[*]}"
     fi
 }
@@ -2618,6 +2627,11 @@ main() {
     download_and_install
     verify_installation
     run_vibe_setup
+    if [[ -n "$VIBE_SETUP_FAILED" ]]; then
+        print_error "REACHABLE is installed but this workspace was NOT wired: $VIBE_SETUP_FAILED"
+        print_info "Fix the cause above and run: reachable: setup   (or rerun this installer with --repo /path/to/project)"
+        exit 1
+    fi
     print_success
 }
 
