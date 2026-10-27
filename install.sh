@@ -870,6 +870,14 @@ apply_version_selection() {
     fi
 }
 
+# Version resolution parses JSON with python3, before detect_environment
+# checks for Python. On a host with no usable Python that printed
+# "python3: command not found" twice and exited 127, never naming the
+# requirement (reach-core docker/install-refusals.sh, no-python case).
+if [[ -z "$LOCAL_WHEEL" && "$UNINSTALL_MODE" != true ]] && ! resolve_python_bin >/dev/null 2>&1; then
+    echo "Error: Python 3.11+ not found"
+    exit 1
+fi
 apply_version_selection
 
 # -----------------------------------------------------------------------------
