@@ -2400,7 +2400,13 @@ run_vibe_setup() {
     # reach-core keeps `install` as a hidden forwarding alias precisely so
     # THIS file can change first. Once this installer has propagated, that
     # alias gets deleted -- see reach_agent/cli.py.
-    local -a vibe_cmd=("$reachctl_bin" vibe wire-workspace --repo "$workspace" --ci)
+    # No `--ci` (decision D-4, 2026-10-27). In reach-core it made wire-workspace
+    # install the Gate 1 guardrail skills without forcing them, so any host with
+    # CI set got none; that coupling is gone (reach-core 5b8136c0). Its only
+    # other effect is a `reachctl doctor --ci` tool preflight, which
+    # verify_installation has already done (`doctor --full`). SINGLE-INSTALL-MODE:
+    # install.sh adds no CI behaviour of its own.
+    local -a vibe_cmd=("$reachctl_bin" vibe wire-workspace --repo "$workspace")
     local agent_name
     if ((${#VIBE_AGENTS[@]})); then
         for agent_name in "${VIBE_AGENTS[@]}"; do
