@@ -467,6 +467,9 @@ RELEASE_TAG=""
 # -----------------------------------------------------------------------------
 UPDATE_MODE=false
 CUSTOM_VERSION=""
+# true when "which version" came from the unsigned latest.json pointer; the
+# release's signed current-release statement is then required (§13.8).
+VERSION_FROM_LATEST_POINTER=false
 CLEAN_DATA=false
 LOCAL_WHEEL=""
 AIRGAP_BUNDLE_INPUT=""
@@ -841,6 +844,7 @@ apply_version_selection() {
             if ! VERSION=$(resolve_version); then
                 exit 1
             fi
+            VERSION_FROM_LATEST_POINTER=true
         fi
         if [[ -z "$VERSION" ]]; then
             echo "Error: could not resolve the latest version from ${LATEST_MANIFEST_URL}"
@@ -1683,6 +1687,72 @@ BOOTSTRAP_PY
 }
 
 
+# The current-release statement (§13.8): both release signatures over
+# reachable-latest.json, from the key list the full gate just verified; the
+# statement names this version and this manifest, and has not expired.
+# Runs in the download dir; the venv python has `cryptography` for ML-DSA.
+verify_current_release_statement() {
+    local want_version="$1"
+    "$HOME/.reachable/venv/bin/python" - "$want_version" <<'LATEST_PY'
+import base64, hashlib, json, pathlib, subprocess, sys, tempfile
+from datetime import datetime, timezone
+
+want = sys.argv[1]
+d = pathlib.Path(".")
+
+def die(msg):
+    print(f"current-release statement: {msg}", file=sys.stderr)
+    print("  The install was stopped before anything was written.", file=sys.stderr)
+    sys.exit(2)
+
+kl = json.loads((d / "key-list.json").read_text())
+keys = {k["role"]: k for k in kl["keys"]}
+for role in ("release-ecdsa-p384", "release-mldsa-87"):
+    if role not in keys:
+        die(f"key list names no {role} key")
+
+def pem(spki_b64):
+    return "-----BEGIN PUBLIC KEY-----\n" + spki_b64 + "\n-----END PUBLIC KEY-----\n"
+
+with tempfile.TemporaryDirectory() as tmp:
+    pub = pathlib.Path(tmp) / "p384.pem"
+    pub.write_text(pem(keys["release-ecdsa-p384"]["pubkey"]))
+    r = subprocess.run(["openssl", "dgst", "-sha384", "-verify", str(pub),
+                        "-signature", "reachable-latest.json.p384.sig", "reachable-latest.json"],
+                       capture_output=True)
+    if r.returncode != 0:
+        die("P-384 release signature does not verify over reachable-latest.json")
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+mldsa = serialization.load_pem_public_key(pem(keys["release-mldsa-87"]["pubkey"]).encode())
+try:
+    mldsa.verify((d / "reachable-latest.json.mldsa87.sig").read_bytes(), (d / "reachable-latest.json").read_bytes())
+except InvalidSignature:
+    die("ML-DSA-87 release signature does not verify over reachable-latest.json")
+
+st = json.loads((d / "reachable-latest.json").read_text())
+if st.get("schema") != "sthenos.reachable.latest/1":
+    die(f"unknown statement schema {st.get('schema')!r}")
+if st.get("version") != want:
+    die(f"the signed statement names {st.get('version')!r} as current, not {want!r}: the "
+        "advertised version is not the one the release signers vouch for")
+got = hashlib.sha384((d / "reachable-signed-manifest.json").read_bytes()).hexdigest()
+if st.get("manifest_sha384") != got:
+    die("the statement is for a different manifest than the one verified")
+try:
+    expires = datetime.strptime(st["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+except (KeyError, ValueError):
+    die("the statement carries no readable expires_at")
+now = datetime.now(timezone.utc)
+if now >= expires:
+    die(f"the statement expired at {st['expires_at']} (now {now.strftime('%Y-%m-%dT%H:%M:%SZ')}): "
+        f"{want} has not been re-asserted as current. Either a newer release exists and the "
+        "advertised version is stale, or the weekly renewal has not run. Do not install it as 'latest'.")
+LATEST_PY
+}
+
+
 # -----------------------------------------------------------------------------
 # Download & Install
 # -----------------------------------------------------------------------------
@@ -2015,6 +2085,34 @@ print("\n".join(
         exit 1
     fi
     print_ok "Release verified (P-384 + ML-DSA-87, manifest bound)"
+
+    # ── The version came from an unsigned pointer: the release must say, under
+    #    both release keys, that it is current (INSTALLER-ATTESTATION §13.8).
+    #    Everything above proves the artifacts are b<N>'s; nothing above proves
+    #    b<N> is the version we should be installing. latest.json is built by
+    #    reach-cloud from the GitHub API and nobody signs it, so a rewritten
+    #    pointer could steer a fresh machine to an older, genuinely signed
+    #    release, or never advertise a newer one. The statement is short-lived
+    #    (renewed weekly for the newest release only), so an old release's
+    #    statement lapses. An explicit --version is the user's own choice and is
+    #    not checked against "current". Not a fallback: a missing, foreign,
+    #    or expired statement stops the install by name.
+    if [[ "$VERSION_FROM_LATEST_POINTER" == true ]]; then
+        for f in reachable-latest.json reachable-latest.json.p384.sig reachable-latest.json.mldsa87.sig; do
+            if ! download_dist_artifact "Downloading $f" "$f" "$f"; then
+                print_error "Could not fetch $f — aborting"
+                print_info "Every release since 1.0.0b248 publishes a signed statement that it is the"
+                print_info "current release. Its absence means the version advertised by"
+                print_info "${LATEST_MANIFEST_URL} is not one the release signers vouch for today."
+                print_info "Pin a version you have chosen yourself: --version <version>"
+                exit 1
+            fi
+        done
+        if ! verify_current_release_statement "$VERSION"; then
+            exit 1
+        fi
+        print_ok "Release is the current one (signed statement, unexpired)"
+    fi
 
     CONSTRAINTS_MODE="hash"
     print_ok "Dependency constraints verified (hash-pinned, manifest-bound)"

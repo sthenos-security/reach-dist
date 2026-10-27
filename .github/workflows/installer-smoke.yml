@@ -65,6 +65,9 @@ jobs:
       - name: The install summary detects no CI
         run: bash ./test-installer-summary-no-ci.sh
 
+      - name: A pointer-resolved version needs the release's signed, unexpired current-release statement
+        run: bash ./test-installer-current-release-statement.sh
+
       # Python 3.11 ships pip 24.0, the oldest pip a supported CPython
       # (3.11-3.14) brings. An air-gap install cannot upgrade pip, so the
       # installer must work with it (b236 did not).
