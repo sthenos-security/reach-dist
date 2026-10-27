@@ -2423,14 +2423,16 @@ run_vibe_setup() {
         local vibe_log
         vibe_log="$(mktemp "$REACHABLE_TMP_ROOT/vibe-install.XXXXXX")"
         print_info "Workspace wiring started"
-        if "${vibe_cmd[@]}" > "$vibe_log" 2>&1; then
-            if [[ -n "${INSTALL_LOG:-}" ]]; then
-                {
-                    echo ""
-                    echo "=== reach-vibe setup output ==="
-                    cat "$vibe_log"
-                } >> "$INSTALL_LOG"
-            fi
+        local vibe_rc=0
+        "${vibe_cmd[@]}" > "$vibe_log" 2>&1 || vibe_rc=$?
+        if [[ -n "${INSTALL_LOG:-}" ]]; then
+            {
+                echo ""
+                echo "=== reach-vibe setup output ==="
+                cat "$vibe_log"
+            } >> "$INSTALL_LOG"
+        fi
+        if [[ $vibe_rc -eq 0 ]]; then
             print_ok "Workspace wired"
             local ui_output
             ui_output="$("$reachctl_bin" vibe ui --repo "$workspace" --no-open 2>/dev/null || true)"
@@ -2438,16 +2440,17 @@ run_vibe_setup() {
             if [[ -n "$VIBE_UI_URL" ]]; then
                 print_info "Dashboard: $VIBE_UI_URL"
             fi
+        elif [[ $vibe_rc -eq 3 ]]; then
+            # wire-workspace's WIRE_WORKSPACE_HELD_EXIT: the agent-config guard
+            # flagged an agent's auto-loaded config, so nothing was wired for it.
+            print_error "The agent-config guard held this workspace; nothing was wired for the flagged agent:"
+            grep -E '^[[:space:]]*held:' "$vibe_log" | while IFS= read -r held_line; do
+                print_error "  ${held_line#"${held_line%%[![:space:]]*}"}"
+            done
+            VIBE_SETUP_FAILED="the agent-config guard held the agent (see the held: lines above and $INSTALL_LOG)"
         else
-            if [[ -n "${INSTALL_LOG:-}" ]]; then
-                {
-                    echo ""
-                    echo "=== reach-vibe setup output ==="
-                    cat "$vibe_log"
-                } >> "$INSTALL_LOG"
-            fi
             print_warn "reach-vibe setup failed, but reachable itself is installed (see $INSTALL_LOG)"
-            VIBE_SETUP_FAILED="reachctl vibe wire-workspace exited non-zero (see $INSTALL_LOG)"
+            VIBE_SETUP_FAILED="reachctl vibe wire-workspace exited $vibe_rc (see $INSTALL_LOG)"
             print_info "Retry later with: ${vibe_cmd[*]}"
         fi
         rm -f "$vibe_log"
