@@ -6,9 +6,9 @@
 # nobody signs. Every release since b248 ships reachable-latest.json, signed
 # by both release keys, naming itself current with an expiry. This runs the
 # check's own Python, extracted from install.sh, against a release directory
-# built with fresh P-384 and ML-DSA-87 keys: it passes a genuine, current
-# statement and refuses one for another version, one that has expired, one
-# for a different manifest, and one with a forged P-384 signature.
+# built with fresh P-384 and ML-DSA-87 keys: it passes a genuine statement
+# and refuses one for another version, one for a different manifest, and one
+# with a forged signature (either half). No expiry: beta decision, §13.8.
 #
 # Needs a python with `cryptography` >= 46 (ML-DSA). install.sh itself runs
 # the check with ~/.reachable/venv/bin/python, where that is guaranteed; here
@@ -37,14 +37,14 @@ fi
 # A release directory: key list naming a P-384 and an ML-DSA-87 release key,
 # a manifest, and a statement signed by both -- version/expiry/manifest digest
 # as asked.
-make_release() {  # $1=dir $2=stated_version $3=expires_at [$4=manifest_override]
+make_release() {  # $1=dir $2=stated_version [$3=manifest_override]
   local dir="$1"
   mkdir -p "$dir"
-  "$PYTHON_BIN" - "$dir" "$2" "$3" "${4:-}" <<'PY'
+  "$PYTHON_BIN" - "$dir" "$2" "${3:-}" <<'PY'
 import base64, hashlib, json, pathlib, sys
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, mldsa
-d, version, expires, manifest_override = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+d, version, manifest_override = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 p384 = ec.generate_private_key(ec.SECP384R1())
 ml = mldsa.MLDSA87PrivateKey.generate()
 def spki(pub):
@@ -58,7 +58,7 @@ manifest = json.dumps({"schema": "reachable.release-manifest.v1", "version": "1.
 (d / "reachable-signed-manifest.json").write_text(manifest)
 bound = manifest_override.encode() if manifest_override else manifest.encode()
 statement = json.dumps({"schema": "sthenos.reachable.latest/1", "product": "reachable", "version": version,
-    "issued_at": "2026-10-27T00:00:00Z", "expires_at": expires,
+    "issued_at": "2026-10-27T00:00:00Z",
     "manifest_sha384": hashlib.sha384(bound).hexdigest()}, sort_keys=True).encode()
 (d / "reachable-latest.json").write_bytes(statement)
 (d / "reachable-latest.json.p384.sig").write_bytes(p384.sign(statement, ec.ECDSA(hashes.SHA384())))
@@ -67,36 +67,33 @@ PY
 }
 
 run_check() { (cd "$1" && "$PYTHON_BIN" "$WORK/latest_check.py" "$2" 2>"$WORK/err"); }
-FAR="2999-01-01T00:00:00Z"
 
-# 1. Positive control: current, unexpired, this manifest.
-make_release "$WORK/good" 1.0.0b248 "$FAR"
+# 1. Positive control: current, this manifest.
+make_release "$WORK/good" 1.0.0b248
 run_check "$WORK/good" 1.0.0b248 || fail "a genuine current statement was refused: $(cat "$WORK/err")"
 
 # 2. The statement vouches for another version: the pointer sent us elsewhere.
-make_release "$WORK/foreign" 1.0.0b230 "$FAR"
+make_release "$WORK/foreign" 1.0.0b230
 if run_check "$WORK/foreign" 1.0.0b248; then fail "a statement for another version was accepted"; fi
 grep -q "names '1.0.0b230' as current, not '1.0.0b248'" "$WORK/err" || fail "foreign version not named: $(cat "$WORK/err")"
 
-# 3. Expired: the release was never re-asserted.
-make_release "$WORK/expired" 1.0.0b248 "2026-01-01T00:00:00Z"
-if run_check "$WORK/expired" 1.0.0b248; then fail "an expired statement was accepted"; fi
-grep -q "expired at 2026-01-01T00:00:00Z" "$WORK/err" || fail "expiry not named: $(cat "$WORK/err")"
+# 3. No expiry (beta decision): a statement issued long ago is still accepted.
+grep -q 'expires_at' "$WORK/latest_check.py" && fail "the check reads expires_at; the beta decision is no expiry (§13.8)"
 
 # 4. A statement bound to a different manifest.
-make_release "$WORK/othermanifest" 1.0.0b248 "$FAR" '{"other": true}'
+make_release "$WORK/othermanifest" 1.0.0b248 '{"other": true}'
 if run_check "$WORK/othermanifest" 1.0.0b248; then fail "a statement for another manifest was accepted"; fi
 grep -q "different manifest" "$WORK/err" || fail "manifest mismatch not named: $(cat "$WORK/err")"
 
 # 5. Forged: the P-384 signature is from a key the key list does not name.
-make_release "$WORK/forged" 1.0.0b248 "$FAR"
-make_release "$WORK/forged-src" 1.0.0b248 "$FAR"
+make_release "$WORK/forged" 1.0.0b248
+make_release "$WORK/forged-src" 1.0.0b248
 cp "$WORK/forged-src/reachable-latest.json.p384.sig" "$WORK/forged/reachable-latest.json.p384.sig"
 if run_check "$WORK/forged" 1.0.0b248; then fail "a forged P-384 signature was accepted"; fi
 grep -q "P-384 release signature does not verify" "$WORK/err" || fail "forgery not named: $(cat "$WORK/err")"
 
 # 6. Forged ML-DSA half.
-make_release "$WORK/forged-ml" 1.0.0b248 "$FAR"
+make_release "$WORK/forged-ml" 1.0.0b248
 cp "$WORK/forged-src/reachable-latest.json.mldsa87.sig" "$WORK/forged-ml/reachable-latest.json.mldsa87.sig"
 if run_check "$WORK/forged-ml" 1.0.0b248; then fail "a forged ML-DSA signature was accepted"; fi
 grep -q "ML-DSA-87 release signature does not verify" "$WORK/err" || fail "ML-DSA forgery not named: $(cat "$WORK/err")"
@@ -104,4 +101,4 @@ grep -q "ML-DSA-87 release signature does not verify" "$WORK/err" || fail "ML-DS
 # 7. An explicit --version is the user's choice: the check is not run for it.
 grep -q 'VERSION_FROM_LATEST_POINTER" == true' "$INSTALLER" || fail "the check is not gated on the pointer-resolved case"
 
-echo "PASS: the installer accepts only a signed, unexpired statement that names this release"
+echo "PASS: the installer accepts only a signed statement that names this release and manifest"

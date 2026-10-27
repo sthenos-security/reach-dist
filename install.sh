@@ -1689,13 +1689,12 @@ BOOTSTRAP_PY
 
 # The current-release statement (§13.8): both release signatures over
 # reachable-latest.json, from the key list the full gate just verified; the
-# statement names this version and this manifest, and has not expired.
+# statement names this version and this manifest. No expiry (beta decision).
 # Runs in the download dir; the venv python has `cryptography` for ML-DSA.
 verify_current_release_statement() {
     local want_version="$1"
     "$HOME/.reachable/venv/bin/python" - "$want_version" <<'LATEST_PY'
 import base64, hashlib, json, pathlib, subprocess, sys, tempfile
-from datetime import datetime, timezone
 
 want = sys.argv[1]
 d = pathlib.Path(".")
@@ -1740,15 +1739,6 @@ if st.get("version") != want:
 got = hashlib.sha384((d / "reachable-signed-manifest.json").read_bytes()).hexdigest()
 if st.get("manifest_sha384") != got:
     die("the statement is for a different manifest than the one verified")
-try:
-    expires = datetime.strptime(st["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-except (KeyError, ValueError):
-    die("the statement carries no readable expires_at")
-now = datetime.now(timezone.utc)
-if now >= expires:
-    die(f"the statement expired at {st['expires_at']} (now {now.strftime('%Y-%m-%dT%H:%M:%SZ')}): "
-        f"{want} has not been re-asserted as current. Either a newer release exists and the "
-        "advertised version is stale, or the weekly renewal has not run. Do not install it as 'latest'.")
 LATEST_PY
 }
 
@@ -2092,11 +2082,12 @@ print("\n".join(
     #    b<N> is the version we should be installing. latest.json is built by
     #    reach-cloud from the GitHub API and nobody signs it, so a rewritten
     #    pointer could steer a fresh machine to an older, genuinely signed
-    #    release, or never advertise a newer one. The statement is short-lived
-    #    (renewed weekly for the newest release only), so an old release's
-    #    statement lapses. An explicit --version is the user's own choice and is
-    #    not checked against "current". Not a fallback: a missing, foreign,
-    #    or expired statement stops the install by name.
+    #    release. The statement does not expire (beta decision, §13.8): it
+    #    proves the release signers made the "current" claim and binds it to
+    #    this manifest; a release from before b248 has none and can never be
+    #    "latest". An explicit --version is the user's own choice and is not
+    #    checked against "current". Not a fallback: a missing or foreign
+    #    statement stops the install by name.
     if [[ "$VERSION_FROM_LATEST_POINTER" == true ]]; then
         for f in reachable-latest.json reachable-latest.json.p384.sig reachable-latest.json.mldsa87.sig; do
             if ! download_dist_artifact "Downloading $f" "$f" "$f"; then
@@ -2111,7 +2102,7 @@ print("\n".join(
         if ! verify_current_release_statement "$VERSION"; then
             exit 1
         fi
-        print_ok "Release is the current one (signed statement, unexpired)"
+        print_ok "Release is the current one (signed statement)"
     fi
 
     CONSTRAINTS_MODE="hash"

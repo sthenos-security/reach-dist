@@ -65,7 +65,7 @@ jobs:
       - name: The install summary detects no CI
         run: bash ./test-installer-summary-no-ci.sh
 
-      - name: A pointer-resolved version needs the release's signed, unexpired current-release statement
+      - name: A pointer-resolved version needs the release's signed current-release statement
         run: bash ./test-installer-current-release-statement.sh
 
       # Python 3.11 ships pip 24.0, the oldest pip a supported CPython
