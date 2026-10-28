@@ -27,6 +27,7 @@
 #    ./install.sh --update          # Upgrade with backup
 #    ./install.sh --clean           # Clean install (removes data)
 #    ./install.sh --version <ver>   # Install specific version
+#    ./install.sh --channel candidate --dist-base-url <draft-assets-url>
 #
 # =============================================================================
 
@@ -467,6 +468,10 @@ RELEASE_TAG=""
 # -----------------------------------------------------------------------------
 UPDATE_MODE=false
 CUSTOM_VERSION=""
+# The channel is signed into reachable-signed-manifest.json and passed to the
+# verifier below. A candidate build must never silently resolve a public
+# runtime, and a public install must never accept a private candidate manifest.
+INSTALL_CHANNEL="public"
 # true when "which version" came from the unsigned latest.json pointer; the
 # release's signed current-release statement is then required (§13.8).
 VERSION_FROM_LATEST_POINTER=false
@@ -524,6 +529,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dist-base-url)
             REACHABLE_DIST_BASE_URL="$2"
+            shift 2
+            ;;
+        --channel)
+            INSTALL_CHANNEL="$2"
             shift 2
             ;;
         --clean)
@@ -614,6 +623,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --dist-root DIR    Install from a local signed dist artifact directory"
             echo "  --dist-base-url URL"
             echo "                     Install from a signed dist artifact base URL"
+            echo "  --channel public|candidate"
+            echo "                     Select the signed delivery channel. candidate is CI-only and"
+            echo "                     requires a release-assets token plus --dist-root or --dist-base-url."
             echo "  --no-vibe          Install the scanner ONLY: no daemon, no agent hooks,"
             echo "                     no MCP server, no generated skills. This exists for CI"
             echo "                     runners and other ephemeral, non-interactive hosts: a"
@@ -677,6 +689,29 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+case "$INSTALL_CHANNEL" in
+    public|candidate)
+        ;;
+    *)
+        echo "Error: --channel must be public or candidate, got: $INSTALL_CHANNEL" >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$INSTALL_CHANNEL" == "candidate" ]]; then
+    if [[ -z "${RELEASES_API_TOKEN:-}" ]]; then
+        echo "Error: --channel candidate requires the CI-only release-assets token in GITHUB_TOKEN." >&2
+        exit 2
+    fi
+    if [[ -z "${REACHABLE_DIST_ROOT:-}" && -z "${REACHABLE_DIST_BASE_URL:-}" ]]; then
+        echo "Error: --channel candidate requires --dist-root or --dist-base-url for the draft release assets." >&2
+        exit 2
+    fi
+elif [[ -n "${REACHABLE_DIST_ROOT:-}" || -n "${REACHABLE_DIST_BASE_URL:-}" ]]; then
+    echo "Error: --dist-root and --dist-base-url are candidate-only; pass --channel candidate explicitly." >&2
+    exit 2
+fi
 
 # Resolve the install surface once, after the whole argv has been read, so the
 # result is independent of flag order. Contradictory flags abort; they are never
@@ -2054,6 +2089,7 @@ print("\n".join(
         --manifest reachable-signed-manifest.json
         --manifest-sig reachable-signed-manifest.json.p384.sig
         --manifest-sig reachable-signed-manifest.json.mldsa87.sig
+        --expected-channel "$INSTALL_CHANNEL"
     )
     for s in "${KEY_SIGS[@]}"; do
         VERIFY_ARGS+=(--key-sig "$s")
