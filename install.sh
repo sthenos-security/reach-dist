@@ -479,6 +479,7 @@ CLEAN_DATA=false
 LOCAL_WHEEL=""
 AIRGAP_BUNDLE_INPUT=""
 AIRGAP_MIRROR_ROOT=""
+INSTALL_ONLY=false
 
 # REACHABLE has one install mode.  The continuous surface — daemon, agent
 # hooks, MCP registration, and generated skills/rules — is installed by
@@ -563,6 +564,12 @@ while [[ $# -gt 0 ]]; do
             AIRGAP_MIRROR_ROOT="$2"
             shift 2
             ;;
+        --install-only)
+            # Bundle-only: install the verified, locked wheelhouse without
+            # importing enclave data, running doctor, or wiring a workspace.
+            INSTALL_ONLY=true
+            shift
+            ;;
         --vibe-coding|--vibe)
             # Redundant with the default, but published agent plugins send it
             # on every install and the bootstrap forwards it, so it must keep
@@ -621,6 +628,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --version, -v VER  Install specific version (e.g., 1.0.0b35)"
             echo "  --wheel, -w FILE   Install from local wheel file (skips download)"
             echo "  --dist-root DIR    Install from a local signed dist artifact directory"
+            echo "  --bundle PATH      Install from a signed air-gap bundle directory or archive"
+            echo "  --mirror-root DIR  With --bundle: import the licence and intel snapshot"
+            echo "  --install-only     With --bundle: offline locked install only; no mirror,"
+            echo "                     doctor, selftest, daemon, workspace wiring or scans."
             echo "  --dist-base-url URL"
             echo "                     Install from a signed dist artifact base URL"
             echo "  --channel public|candidate"
@@ -689,6 +700,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$INSTALL_ONLY" == true && ( -z "$AIRGAP_BUNDLE_INPUT" || -n "$AIRGAP_MIRROR_ROOT" ) ]]; then
+    echo "Error: --install-only requires --bundle and cannot be combined with --mirror-root (use full bundle mode for enclave setup)" >&2
+    exit 2
+fi
 
 case "$INSTALL_CHANNEL" in
     public|candidate)
@@ -767,7 +783,7 @@ if [[ -n "$AIRGAP_BUNDLE_INPUT" ]]; then
         exit 1
     fi
     REACHABLE_DIST_ROOT="$REACHABLE_AIRGAP_BUNDLE_ROOT"
-    if [[ -z "$AIRGAP_MIRROR_ROOT" || ! -d "$AIRGAP_MIRROR_ROOT" ]]; then
+    if [[ "$INSTALL_ONLY" != true && ( -z "$AIRGAP_MIRROR_ROOT" || ! -d "$AIRGAP_MIRROR_ROOT" ) ]]; then
         echo "Error: --bundle needs --mirror-root <dir>: the transferred mirror directory with the licence and the intel snapshot"
         exit 1
     fi
@@ -1494,7 +1510,9 @@ handle_existing_install() {
         print_info "Installed version: $INSTALLED_VERSION"
         print_info "Target version:    $WHEEL_VERSION"
         
-        if [[ "$INSTALLED_VERSION" == "$WHEEL_VERSION" && -x "$HOME/.reachable/venv/bin/reachctl" && "$CLEAN_DATA" != true ]]; then
+        # Bundle install-only must recheck the signed bundle and locked wheel
+        # install even when an older run left a same-version runtime behind.
+        if [[ "$INSTALLED_VERSION" == "$WHEEL_VERSION" && -x "$HOME/.reachable/venv/bin/reachctl" && "$CLEAN_DATA" != true && "$INSTALL_ONLY" != true ]]; then
             # Version match is not enough. The venv python is a copied binary
             # tied to the CPython that created it. CI's setup-python can make
             # a stale copy start via LD_LIBRARY_PATH, then scan children die
@@ -2799,6 +2817,11 @@ main() {
     detect_environment
     handle_existing_install
     download_and_install
+    if [[ "$INSTALL_ONLY" == true ]]; then
+        print_ok "Bundle install-only complete: signed bundle verified and hash-locked wheels installed offline."
+        print_info "Enclave setup, doctor, selftest, surface wiring and scans were not run."
+        return
+    fi
     verify_installation
     run_vibe_setup
     if [[ -n "$VIBE_SETUP_FAILED" ]]; then
