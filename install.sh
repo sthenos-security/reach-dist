@@ -1585,12 +1585,23 @@ handle_existing_install() {
             echo "    database compatibility issues between versions."
             echo ""
             
+            # No terminal to ask (CI, a plugin bootstrap, `ssh host cmd`): refuse
+            # by name before anything changes. Until 2026-11-02 the read below ran
+            # regardless and bash died on "/dev/tty: No such device or address"
+            # (reach-core G24 run 41470868277, G15 run 41484582820).
+            if ! { : < /dev/tty; } 2>/dev/null; then
+                print_error "REACHABLE v$INSTALLED_VERSION is already installed and there is no terminal to ask."
+                print_info "Pass --update to upgrade it (keeps data) or --clean to reinstall. Nothing was changed."
+                exit 2
+            fi
             # F-008: read from /dev/tty so prompts work inside curl | bash (CWE-676)
             read -p "  Continue with upgrade (keeps data)? [y/N] " -n 1 -r < /dev/tty
             echo ""
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                print_info "Installation cancelled"
-                exit 0
+                # Non-zero: nothing was installed, and a caller (the plugin
+                # bootstrap) must not read a declined upgrade as a finished one.
+                print_info "Installation cancelled. Nothing was changed."
+                exit 1
             fi
             UPDATE_MODE=true
         fi
