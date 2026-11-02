@@ -86,6 +86,15 @@ venv_line=$(grep -n '"$PY_BIN" -m venv "$HOME/.reachable/venv"' "$INSTALLER" | t
 (( full_line < remove_line && statement_line < remove_line && remove_line < venv_line )) \
     || fail "the existing install is touched before the release is proven (verify $full_line, statement $statement_line, remove $remove_line, venv $venv_line)"
 
+# 6c. Removing the previous version is not allowed to fail silently: a
+#     failure there must stop the install while the old one is still in place
+#     (no-silent-fallback rule; reviewer, 2026-11-02).
+if grep -Fq 'uninstall_managed_reachable || true' "$INSTALLER"; then
+    fail "a failed removal of the previous version is ignored (uninstall_managed_reachable || true)"
+fi
+grep -Fq 'if ! uninstall_managed_reachable; then' "$INSTALLER" \
+    || fail "a failed removal of the previous version does not stop the install"
+
 # 7. Fail-closed: a failed bootstrap or failed full verification must exit.
 grep -A6 'Release verification FAILED' "$INSTALLER" | grep -Fq 'exit 1' \
     || fail "a failed release verification does not abort the install"

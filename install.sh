@@ -1820,7 +1820,11 @@ download_and_install() {
         if managed_reachable_version &> /dev/null; then
             print_step "Removing previous installation"
             stop_managed_daemon
-            uninstall_managed_reachable || true
+            if ! uninstall_managed_reachable; then
+                print_error "Removing the previous version failed (pip uninstall reachable) — aborting"
+                print_info "The previous install is still in place: nothing was replaced."
+                exit 1
+            fi
             print_ok "Previous version removed"
         fi
         
@@ -2168,7 +2172,12 @@ print("\n".join(
     if managed_reachable_version &> /dev/null; then
         print_step "Removing previous installation"
         stop_managed_daemon
-        uninstall_managed_reachable || true
+        if ! uninstall_managed_reachable; then
+            print_error "Removing the previous version failed (pip uninstall reachable) — aborting"
+            print_info "The previous install is still in place: nothing was replaced."
+            print_info "Rerun the installer; if it fails again, report to info@sthenosec.com"
+            exit 1
+        fi
         print_ok "Previous version removed"
     fi
 

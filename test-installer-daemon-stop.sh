@@ -70,7 +70,7 @@ while IFS= read -r line; do
   prev="$(sed -n "$((n-1))p" "$ROOT_DIR/install.sh")"
   [[ "$prev" =~ ^[[:space:]]*stop_managed_daemon$ ]] \
     || fail "install.sh:$n removes the runtime without stop_managed_daemon on the line before: $line"
-done < <(grep -n -E '^\s*(rm -rf "\$HOME/\.reachable(/venv)?"|uninstall_managed_reachable \|\| true)$' "$ROOT_DIR/install.sh")
+done < <(grep -n -E '^\s*(rm -rf "\$HOME/\.reachable(/venv)?"|if ! uninstall_managed_reachable; then)$' "$ROOT_DIR/install.sh")
 [[ $sites -ge 4 ]] || fail "expected at least 4 runtime-removal sites in install.sh, found $sites"
 echo "PASS all $sites runtime-removal sites stop the daemon first"
 echo "OK"
