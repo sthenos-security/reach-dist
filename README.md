@@ -1,5 +1,11 @@
 # REACHABLE by Sthenos Security
 
+[![Latest release](https://img.shields.io/github/v/release/sthenos-security/reach-dist?include_prereleases&label=scanner)](https://github.com/sthenos-security/reach-dist/releases)
+[![Download](https://img.shields.io/badge/download-sthenosec.com-blue)](https://sthenosec.com/download)
+[![Status: early access (beta)](https://img.shields.io/badge/status-early%20access%20(beta)-orange)](https://sthenosec.com)
+[![License: proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
+[![Sthenos Security](https://img.shields.io/badge/Sthenos%20Security-sthenosec.com-B22222)](https://sthenosec.com)
+
 Risk Exposure Validation for the AI era. REACHABLE combines deterministic validation, bounded AI reasoning, and agentic remediation to reduce exploitable risk first. One command, full interactive dashboard, about 90 seconds.
 
 ## REACHABLE trust root
