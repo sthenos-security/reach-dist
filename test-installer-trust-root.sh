@@ -62,10 +62,29 @@ verifier_line=$(grep -n 'verify_release_manifest.py "' "$INSTALLER" | tail -1 | 
 (( bootstrap_line < verifier_line )) \
     || fail "openssl bootstrap (line $bootstrap_line) runs after the verifier ($verifier_line)"
 
-# 6. The verifier runs with the venv python (cryptography installed
-#    hash-pinned), not the system python -- the ML-DSA half lives there.
-grep -Fq '"$HOME/.reachable/venv/bin/python" verify_release_manifest.py' "$INSTALLER" \
-    || fail "verifier is not run under the managed venv python"
+# 6. The verifier runs with its own venv python (cryptography installed
+#    hash-pinned), not the system python -- the ML-DSA half lives there --
+#    and not the managed venv, which must not be touched before the release
+#    is proven.
+grep -Fq '"$VERIFIER_PY" verify_release_manifest.py' "$INSTALLER" \
+    || fail "verifier is not run under the verifier venv python"
+grep -Fq 'VERIFY_VENV="$(mktemp -d "$REACHABLE_TMP_ROOT/verify-venv.XXXXXX")"' "$INSTALLER" \
+    || fail "no throwaway verifier venv"
+
+# 6b. Every check finishes before the existing install is touched. Until
+#     2026-11-02 the full verification (wheel and vendor digests, ML-DSA-87)
+#     and the signed current-release statement ran after "Removing previous
+#     installation", so a tampered upgrade was refused and left no install
+#     (reach-core G24 run 41474869418). Order on the remote install path:
+#     full verify < statement check < remove previous < create managed venv.
+full_line=$(grep -n '"$VERIFIER_PY" verify_release_manifest.py' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
+statement_line=$(grep -n 'if ! verify_current_release_statement "$VERSION"; then' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
+remove_line=$(grep -n 'print_step "Removing previous installation"' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
+venv_line=$(grep -n '"$PY_BIN" -m venv "$HOME/.reachable/venv"' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
+[[ -n "$full_line" && -n "$statement_line" && -n "$remove_line" && -n "$venv_line" ]] \
+    || fail "could not locate full verify ($full_line), statement ($statement_line), removal ($remove_line), venv ($venv_line)"
+(( full_line < remove_line && statement_line < remove_line && remove_line < venv_line )) \
+    || fail "the existing install is touched before the release is proven (verify $full_line, statement $statement_line, remove $remove_line, venv $venv_line)"
 
 # 7. Fail-closed: a failed bootstrap or failed full verification must exit.
 grep -A6 'Release verification FAILED' "$INSTALLER" | grep -Fq 'exit 1' \

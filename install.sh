@@ -1191,7 +1191,7 @@ setup_install_log() {
 }
 
 configure_venv_pip_config() {
-    local venv_dir="$HOME/.reachable/venv"
+    local venv_dir="${1:-$HOME/.reachable/venv}"
     mkdir -p "$venv_dir"
     cat > "$venv_dir/pip.conf" <<EOF
 [global]
@@ -1743,10 +1743,11 @@ BOOTSTRAP_PY
 # The current-release statement (§13.8): both release signatures over
 # reachable-latest.json, from the key list the full gate just verified; the
 # statement names this version and this manifest. No expiry (beta decision).
-# Runs in the download dir; the venv python has `cryptography` for ML-DSA.
+# Runs in the download dir with the verifier venv's python ($VERIFIER_PY), which
+# has `cryptography` for ML-DSA.
 verify_current_release_statement() {
     local want_version="$1"
-    "$HOME/.reachable/venv/bin/python" - "$want_version" <<'LATEST_PY'
+    "${VERIFIER_PY:?verifier venv not prepared}" - "$want_version" <<'LATEST_PY'
 import base64, hashlib, json, pathlib, subprocess, sys, tempfile
 
 want = sys.argv[1]
@@ -2031,38 +2032,38 @@ print("\n".join(
     fi
     print_ok "P-384 signature verified (openssl)"
 
-    # Uninstall previous managed version
-    if managed_reachable_version &> /dev/null; then
-        print_step "Removing previous installation"
-        stop_managed_daemon
-        uninstall_managed_reachable || true
-        print_ok "Previous version removed"
-    fi
-
-    # Install into venv
-    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
-        print_step "Installing reachable v$VERSION"
-    else
-        print_step "Installing REACHABLE v$VERSION"
-    fi
-    if ! "$PY_BIN" -m venv "$HOME/.reachable/venv" 2>&1; then
-        print_error "Failed to create virtual environment"
+    # ── Every check finishes BEFORE the existing install is touched.
+    #    Until 2026-11-02 the steps below ran after "Removing previous
+    #    installation" and inside the freshly rebuilt ~/.reachable/venv: the
+    #    P-384 bootstrap check above covers the key list, the manifest and the
+    #    verifier/constraints digests, but the wheel and vendor digests and the
+    #    ML-DSA-87 signature were only checked afterwards. A tampered upgrade
+    #    (substituted or truncated wheel, corrupted ML-DSA signature) was
+    #    refused AND left the customer with no working install (reach-core G24
+    #    run 41474869418: "refused, but the 1.0.0b258 install is gone").
+    #    The verifier now lives in its own throwaway venv; the managed venv is
+    #    changed only once the release is proven.
+    mkdir -p "$REACHABLE_TMP_ROOT"
+    VERIFY_VENV="$(mktemp -d "$REACHABLE_TMP_ROOT/verify-venv.XXXXXX")"
+    trap 'rm -rf "$VERIFY_VENV"' EXIT
+    if ! "$PY_BIN" -m venv "$VERIFY_VENV" 2>&1; then
+        print_error "Failed to create the signature verifier's virtual environment"
         if [[ "$OS" == "linux" ]]; then
             echo "  Try: sudo apt install python3-venv python3-dev"
         fi
         exit 1
     fi
-    configure_venv_pip_config
+    VERIFIER_PY="$VERIFY_VENV/bin/python"
+    configure_venv_pip_config "$VERIFY_VENV"
     if ! bundle_mode_enabled; then
-        run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
-            "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
+        run_pip_with_retries "Upgrading pip in the verifier venv" "$REACHABLE_PIP_ATTEMPTS" \
+            "$VERIFIER_PY" -u -m pip install --upgrade pip
     fi
 
     # constraints.txt was fetched with the trust artifacts and its sha384 was
     # already checked against the manifest by _bootstrap_openssl_verify. Its
     # hashes now authenticate everything pip touches.
     CONSTRAINTS_FLAG=""
-    CONSTRAINTS_MODE="none"
     if ! grep -q "\-\-hash=" constraints.txt 2>/dev/null; then
         print_error "constraints.txt is not hash-pinned — aborting (supply chain risk)"
         print_info "Every dependency entry MUST include --hash."
@@ -2087,7 +2088,7 @@ print("\n".join(
         exit 1
     fi
     if ! run_pip_with_retries "Installing signature verifier" "$REACHABLE_PIP_ATTEMPTS" \
-        "$HOME/.reachable/venv/bin/python" -u -m pip install \
+        "$VERIFIER_PY" -u -m pip install \
             --require-hashes -r verifier-requirements.txt; then
         print_error "Could not install the signature verifier — aborting"
         print_info "A host that cannot verify a required signature hard-stops."
@@ -2121,7 +2122,7 @@ print("\n".join(
             VERIFY_ARGS+=(--artifact "$a")
         done
     fi
-    if ! "$HOME/.reachable/venv/bin/python" verify_release_manifest.py "${VERIFY_ARGS[@]}"; then
+    if ! "$VERIFIER_PY" verify_release_manifest.py "${VERIFY_ARGS[@]}"; then
         print_error "Release verification FAILED — aborting"
         print_info "The release was not signed by both Sthenos Security release keys, or"
         print_info "an artifact does not match the signed manifest. Report to"
@@ -2157,6 +2158,37 @@ print("\n".join(
             exit 1
         fi
         print_ok "Release is the current one (signed statement)"
+    fi
+
+    rm -rf "$VERIFY_VENV"
+    trap - EXIT
+
+
+    # Uninstall previous managed version
+    if managed_reachable_version &> /dev/null; then
+        print_step "Removing previous installation"
+        stop_managed_daemon
+        uninstall_managed_reachable || true
+        print_ok "Previous version removed"
+    fi
+
+    # Install into venv
+    if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
+        print_step "Installing reachable v$VERSION"
+    else
+        print_step "Installing REACHABLE v$VERSION"
+    fi
+    if ! "$PY_BIN" -m venv "$HOME/.reachable/venv" 2>&1; then
+        print_error "Failed to create virtual environment"
+        if [[ "$OS" == "linux" ]]; then
+            echo "  Try: sudo apt install python3-venv python3-dev"
+        fi
+        exit 1
+    fi
+    configure_venv_pip_config
+    if ! bundle_mode_enabled; then
+        run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
+            "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
     fi
 
     CONSTRAINTS_MODE="hash"
