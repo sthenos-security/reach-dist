@@ -906,6 +906,15 @@ apply_version_selection() {
     fi
 }
 
+# An unsupported OS is refused FIRST, by name. The Python check below runs
+# before detect_environment, so without this a Windows host was told
+# "Python 3.11+ not found" for a platform we never support (reach-core
+# install-refusals, windows case, failing since 6731a52 on b264 and b265).
+case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
+    darwin|linux) ;;
+    *) echo "Error: Unsupported OS: $(uname -s)"; exit 1 ;;
+esac
+
 # Version resolution parses JSON with python3, before detect_environment
 # checks for Python. On a host with no usable Python that printed
 # "python3: command not found" twice and exited 127, never naming the
