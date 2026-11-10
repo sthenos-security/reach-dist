@@ -505,6 +505,8 @@ NO_VIBE_REQUESTED_FLAG=""
 VIBE_SURFACE_REASON="default"
 VIBE_WORKSPACE=""
 UNINSTALL_MODE=false
+UNINSTALL_EXPORT_PATH=""
+UNINSTALL_NO_EXPORT=false
 # Set by run_vibe_setup when the workspace could not be wired; main exits 1 on it.
 # Until 2026-10-27 every such path printed a warning and the installer still
 # exited 0, which the plugin bootstrap read as "installed and wired".
@@ -542,6 +544,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --uninstall)
             UNINSTALL_MODE=true
+            shift
+            ;;
+        --export)
+            UNINSTALL_EXPORT_PATH="$2"
+            shift 2
+            ;;
+        --no-export)
+            UNINSTALL_NO_EXPORT=true
             shift
             ;;
         --yes|-y)
@@ -625,6 +635,8 @@ while [[ $# -gt 0 ]]; do
             echo "                     server, daemon, and ~/.reachable including scan history"
             echo "                     and credentials. Asks first; --yes skips the question."
             echo "  --yes, -y          Answer yes to the --uninstall confirmation"
+            echo "  --export PATH      With --uninstall: save scan history and settings first"
+            echo "  --no-export        With --uninstall: remove without saving an export"
             echo "  --version, -v VER  Install specific version (e.g., 1.0.0b35)"
             echo "  --wheel, -w FILE   Install from local wheel file (skips download)"
             echo "  --dist-root DIR    Install from a local signed dist artifact directory"
@@ -923,7 +935,9 @@ if [[ -z "$LOCAL_WHEEL" && "$UNINSTALL_MODE" != true ]] && ! resolve_python_bin 
     echo "Error: Python 3.11+ not found"
     exit 1
 fi
-apply_version_selection
+if [[ "$UNINSTALL_MODE" != true ]]; then
+    apply_version_selection
+fi
 
 # -----------------------------------------------------------------------------
 # Colors & Formatting
@@ -2832,30 +2846,39 @@ print_success() {
 run_uninstall() {
     local reachctl="$HOME/.reachable/venv/bin/reachctl"
     local workspace
+    local -a export_args=()
     workspace="$(resolve_vibe_workspace)"
     print_header "REACHABLE Uninstall"
+    if [[ -n "$UNINSTALL_EXPORT_PATH" && "$UNINSTALL_NO_EXPORT" == true ]]; then
+        print_error "Choose --export PATH or --no-export, not both."
+        exit 2
+    fi
     if [[ ! -x "$reachctl" ]]; then
         print_error "No REACHABLE runtime at $HOME/.reachable/venv; the uninstall runs through it."
         if [[ -e "$HOME/.reachable" ]]; then
             print_info "$HOME/.reachable exists without a runtime (an install that did not finish)."
-            print_info "Reinstall and run --uninstall again, or remove it by hand: rm -rf \"$HOME/.reachable\""
+            print_info "Reinstall the runtime and run --uninstall again; no files were removed."
         else
             print_info "Nothing to uninstall."
         fi
         exit 1
     fi
-    if [[ "$ASSUME_YES" != true ]]; then
-        echo "  This removes REACHABLE from this machine: agent plugins, MCP server, daemon,"
-        echo "  and $HOME/.reachable including scan history and credentials."
-        # F-008: read from /dev/tty so the question works inside curl | bash.
-        read -p "  Continue? [y/N] " -n 1 -r < /dev/tty
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Uninstall cancelled"
-            exit 0
-        fi
+    if [[ -n "$UNINSTALL_EXPORT_PATH" ]]; then
+        export_args=(--export "$UNINSTALL_EXPORT_PATH")
+    elif [[ "$UNINSTALL_NO_EXPORT" == true ]]; then
+        export_args=(--no-export)
     fi
-    "$reachctl" vibe uninstall --full --yes --workspace "$workspace"
+    if [[ "$ASSUME_YES" == true && ${#export_args[@]} -eq 0 ]]; then
+        print_error "Choose --export PATH or --no-export before using --yes. Nothing was removed."
+        exit 2
+    fi
+    if [[ "$ASSUME_YES" == true ]]; then
+        "$reachctl" vibe uninstall --full --yes --workspace "$workspace" "${export_args[@]}"
+    else
+        # curl | bash has a pipe on stdin. Give the installed CLI the terminal
+        # so it can preview, offer an export and confirm in that order.
+        "$reachctl" vibe uninstall --full --workspace "$workspace" "${export_args[@]}" < /dev/tty
+    fi
 }
 
 main() {
