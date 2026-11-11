@@ -58,6 +58,13 @@ case "$*" in
     echo "doctor ok"; exit 0 ;;
   selftest*)
     if [ "${SELFTEST_MODE:-ok}" = fail ]; then echo "selftest: 2 checks failed"; exit 1; fi
+    # What `reachctl selftest --quiet` prints for one failed check since
+    # reach-core 2026-11-11: the check and its error, then the totals.
+    if [ "${SELFTEST_MODE:-ok}" = fail-named ]; then
+      echo "  [FAIL] ReachabilityAnalyzer: [Errno 1] Operation not permitted: '/home/u/.reachable/venv/bin/python'"
+      echo "SELFTEST FAILED: 46 passed, 1 failed, 0 warnings (12.3s)"
+      exit 1
+    fi
     echo "selftest ok"; exit 0 ;;
   "vibe wire-workspace"*)
     [ "${WIRE_MODE:-ok}" = hang ] && sleep 60
@@ -102,6 +109,23 @@ for setup in 0 1; do
   grep -q "non-fatal" "$WORK/selftest-fail-$setup.out" && fail "selftest failure still called non-fatal"
 done
 echo "PASS a failed selftest fails the install"
+
+# 1b. the failed check reaches the customer's screen AND the install log.
+# b280 on a Linux tester machine (2026-11-11): setup stopped at the selftest
+# with "46 passed, 1 failed" and nothing said which check failed or why, so the
+# agent could not tell the customer the cause.
+for verbose in 0 1; do
+  log="$WORK/install-$verbose.log"; : > "$log"
+  run_case "selftest-named-$verbose" 60 SELFTEST_MODE=fail-named REACHABLE_INSTALLER_AGENT_SETUP=0 REACHABLE_INSTALLER_VERBOSE_SELFTEST=$verbose -- \
+    "INSTALL_LOG='$log'; verify_installation"
+  [[ $RC -eq 1 ]] || fail "a failed check must fail the install (verbose=$verbose), got $RC: $(tail -5 "$WORK/selftest-named-$verbose.out")"
+  grep -qF "[FAIL] ReachabilityAnalyzer: [Errno 1] Operation not permitted" "$WORK/selftest-named-$verbose.out" \
+    || fail "the failed check is not on screen (verbose=$verbose): $(tail -5 "$WORK/selftest-named-$verbose.out")"
+  if [[ $verbose -eq 0 ]]; then
+    grep -qF "[FAIL] ReachabilityAnalyzer" "$log" || fail "the failed check is not in the install log"
+  fi
+done
+echo "PASS the failed selftest check is named on screen and in the install log"
 
 # 2. a hung doctor is stopped at its limit (both output modes)
 for setup in 0 1; do
