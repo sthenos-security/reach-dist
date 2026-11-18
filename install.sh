@@ -59,6 +59,10 @@ REACHABLE_PIP_RETRIES="${REACHABLE_PIP_RETRIES:-5}"
 REACHABLE_PIP_TIMEOUT="${REACHABLE_PIP_TIMEOUT:-120}"
 REACHABLE_PIP_PROGRESS_BAR="${REACHABLE_PIP_PROGRESS_BAR:-off}"
 REACHABLE_PIP_VERBOSE="${REACHABLE_PIP_VERBOSE:-0}"
+# pip's download cache lives inside ~/.reachable, so uninstall removes it with
+# everything else. It used to land in the user's shared ~/.cache/pip (~130 MB,
+# INSTALLER-JOURNEY J4, 2026-11-18), which uninstall must not touch.
+REACHABLE_PIP_CACHE_DIR="$HOME/.reachable/cache/pip"
 REACHABLE_INSTALLER_AGENT_SETUP="${REACHABLE_INSTALLER_AGENT_SETUP:-0}"
 if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
     REACHABLE_INSTALL_PROGRESS_INTERVAL="${REACHABLE_INSTALL_PROGRESS_INTERVAL:-60}"
@@ -1288,7 +1292,7 @@ run_pip_with_retries() {
         esac
     fi
 
-    mkdir -p "$REACHABLE_TMP_ROOT"
+    mkdir -p "$REACHABLE_TMP_ROOT" "$REACHABLE_PIP_CACHE_DIR"
 
     local attempt
     local rc=0
@@ -1311,6 +1315,7 @@ run_pip_with_retries() {
         if [[ "$REACHABLE_PIP_VERBOSE" == "1" ]]; then
             PYTHONUNBUFFERED=1 \
                 PIP_CONFIG_FILE="$HOME/.reachable/venv/pip.conf" \
+                PIP_CACHE_DIR="$REACHABLE_PIP_CACHE_DIR" \
                 "$@" 2>&1 | tee "$attempt_log"
             rc=${PIPESTATUS[0]}
         else
@@ -1320,6 +1325,7 @@ run_pip_with_retries() {
             next_progress=$((started_at + REACHABLE_INSTALL_PROGRESS_INTERVAL))
             PYTHONUNBUFFERED=1 \
                 PIP_CONFIG_FILE="$HOME/.reachable/venv/pip.conf" \
+                PIP_CACHE_DIR="$REACHABLE_PIP_CACHE_DIR" \
                 "$@" > "$attempt_log" 2>&1 &
             pip_pid=$!
             while jobs -pr | grep -qx "$pip_pid"; do
