@@ -53,6 +53,9 @@ jobs:
       - name: A guard hold names the finding on the plugin path
         run: bash ./test-installer-vibe-setup-held.sh
 
+      - name: Downloads retry only transient failures, with a growing delay, and stop
+        run: bash ./test-installer-download-retries.sh
+
       - name: No GitHub token in any process argv
         run: bash ./test-installer-no-token-in-argv.sh
 

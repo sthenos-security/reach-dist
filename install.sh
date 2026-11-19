@@ -103,60 +103,74 @@ api_token_state() {
     fi
 }
 
+# One attempt. Prints "<http_code> <bytes> <seconds>"; exit status is curl's.
+_download_once() {
+    local url="$1" partial="$2"
+    shift 2
+    local -a args=(--fail --location --silent --show-error
+        --write-out "%{http_code} %{size_download} %{time_total}"
+        --connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT"
+        --max-time "$REACHABLE_DOWNLOAD_MAX_TIME"
+        "$@" -o "$partial" "$url")
+    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
+        printf 'header = "Authorization: Bearer %s"\n' "${RELEASES_API_TOKEN}" | curl --config - "${args[@]}"
+    else
+        curl "${args[@]}"
+    fi
+}
+
+# Bounded attempts (1 + REACHABLE_DOWNLOAD_RETRIES), the delay doubling from
+# REACHABLE_DOWNLOAD_RETRY_DELAY. Only transient failures are retried: a
+# timeout, a dropped or refused connection, HTTP 408, 429 or 5xx. Any other
+# HTTP status (404, 403, ...) and every TLS or certificate failure fail at
+# once: retrying a refusal or an integrity failure only hides it.
+# test-installer-download-retries.sh proves recovery, exhaustion and fail-fast.
 download_with_retries() {
     local label="$1"
     local url="$2"
     local output="$3"
     shift 3
     local partial="${output}.part.$$"
-
-    local curl_retry_all_errors=()
-    if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
-        curl_retry_all_errors=(--retry-all-errors)
-    fi
+    local attempts=$((REACHABLE_DOWNLOAD_RETRIES + 1))
+    local delay="$REACHABLE_DOWNLOAD_RETRY_DELAY"
+    local attempt=1 rc stats code transient
 
     print_info "$label"
     print_info "Timeout: ${REACHABLE_DOWNLOAD_MAX_TIME}s; retries: ${REACHABLE_DOWNLOAD_RETRIES}"
-    rm -f "$partial"
-
-    if [[ -n "${RELEASES_API_TOKEN:-}" ]]; then
-        printf 'header = "Authorization: Bearer %s"\n' "${RELEASES_API_TOKEN}" \
-            | curl --config - \
-                --fail \
-                --location \
-                --silent \
-                --show-error \
-                --write-out "  downloaded %{size_download} bytes in %{time_total}s\n" \
-                --connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT" \
-                --max-time "$REACHABLE_DOWNLOAD_MAX_TIME" \
-                --retry "$REACHABLE_DOWNLOAD_RETRIES" \
-                --retry-delay "$REACHABLE_DOWNLOAD_RETRY_DELAY" \
-                --retry-connrefused \
-                "${curl_retry_all_errors[@]}" \
-                "$@" \
-                -o "$partial" \
-                "$url" \
-            && mv "$partial" "$output" \
-            || { rm -f "$partial"; return 1; }
-    else
-        curl \
-            --fail \
-            --location \
-            --silent \
-            --show-error \
-            --write-out "  downloaded %{size_download} bytes in %{time_total}s\n" \
-            --connect-timeout "$REACHABLE_DOWNLOAD_CONNECT_TIMEOUT" \
-            --max-time "$REACHABLE_DOWNLOAD_MAX_TIME" \
-            --retry "$REACHABLE_DOWNLOAD_RETRIES" \
-            --retry-delay "$REACHABLE_DOWNLOAD_RETRY_DELAY" \
-            --retry-connrefused \
-            "${curl_retry_all_errors[@]}" \
-            "$@" \
-            -o "$partial" \
-            "$url" \
-            && mv "$partial" "$output" \
-            || { rm -f "$partial"; return 1; }
-    fi
+    while true; do
+        rm -f "$partial"
+        rc=0
+        stats=$(_download_once "$url" "$partial" "$@") || rc=$?
+        code="${stats%% *}"
+        if [[ $rc -eq 0 ]]; then
+            mv "$partial" "$output"
+            read -r _ bytes secs <<<"$stats"
+            echo "  downloaded $bytes bytes in ${secs}s"
+            return 0
+        fi
+        rm -f "$partial"
+        transient=no
+        case "$code" in
+            408|429|5[0-9][0-9]) transient=yes ;;
+            000|"")
+                # No HTTP answer: 6 resolve, 7 connect, 18 partial, 28 timeout,
+                # 52 empty reply, 55 send, 56 receive. Anything else (TLS 35,
+                # certificate 60, ...) is not transient.
+                case "$rc" in 6|7|18|28|52|55|56) transient=yes ;; esac ;;
+        esac
+        if [[ $transient == no ]]; then
+            echo "  attempt $attempt: HTTP ${code:-none}, curl exit $rc; not retried"
+            return 1
+        fi
+        if (( attempt >= attempts )); then
+            echo "  attempt $attempt of $attempts: HTTP ${code:-none}, curl exit $rc; giving up"
+            return 1
+        fi
+        echo "  attempt $attempt of $attempts: HTTP ${code:-none}, curl exit $rc; retrying in ${delay}s"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
 }
 
 resolve_python_bin() {
