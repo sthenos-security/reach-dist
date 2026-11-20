@@ -1953,6 +1953,7 @@ download_and_install() {
                 pkg=$(basename "$whl" | sed 's/-[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
                 echo "$pkg" >> "$STAMP"
             done
+            keep_vendor_wheels "$WHEEL_DIR/vendor"
         fi
         if [[ -n "${GITHUB_PATH:-}" ]]; then
             # F-009c: idempotent — don't double-append on re-runs (CWE-426)
@@ -2355,6 +2356,7 @@ print("\n".join(
             pkg=$(basename "$whl" | sed 's/-[0-9].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
             echo "$pkg" >> "$STAMP"
         done
+        keep_vendor_wheels vendor
     fi
 
     # Restore the caller's working directory before deleting the temp tree.
@@ -2413,6 +2415,18 @@ bundle_enclave_setup() {
     "$reachctl_bin" airgap feed import --from "$AIRGAP_MIRROR_ROOT" || exit 1
     print_step "Installing the venv scanners from the bundle (offline)"
     "$reachctl_bin" doctor --yes || exit 1
+}
+
+# Keep the verified vendor wheels the venv was built from (reach-core design
+# §16a rule 3, b286 #51): GuardDog setup reinstalls a stamped package that no
+# longer imports from here. Replaced on every install; before b286 they were
+# deleted with the temp tree, leaving nothing to repair from.
+keep_vendor_wheels() {
+    local source_dir="$1"
+    local kept="$HOME/.reachable/vendor-wheels"
+    rm -rf "$kept"
+    mkdir -p "$kept"
+    cp "$source_dir"/*.whl "$kept"/
 }
 
 # Run a command with a wall-clock limit, portably: macOS has no `timeout(1)`.
