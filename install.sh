@@ -2453,6 +2453,75 @@ sys.exit(rc if rc >= 0 else 128 - rc)
 ' "$limit" "$@"
 }
 
+# reach-core design §16a rule 8 [b286 #47]: remove reachable@reachable-local,
+# the local-marketplace plugin from before the GitHub catalog. Left installed,
+# Claude Code can run ITS setup.sh (b230 on Al's Mac), which reinstalls with
+# --update --vibe and calls the new runtime. Only through the claude CLI, which
+# owns installed_plugins.json; every call is bounded and a failure stops here.
+remove_stale_claude_plugin() {
+    local stale_id="reachable@reachable-local" stale_marketplace="reachable-local"
+    local registry="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
+    local claude_bin
+    if ! claude_bin="$(command -v claude)"; then
+        # No CLI to act with. Say so only when the plugin is there.
+        if [[ -f "$registry" ]] && "$PY_BIN" -I -c '
+import json, sys
+sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1]))["plugins"] else 1)
+' "$registry" "$stale_id"; then
+            print_warn "An old Reachable plugin ($stale_id) is installed and the claude CLI is not on PATH."
+            print_warn "Remove it in Claude Code: /plugin uninstall $stale_id"
+        fi
+        return 0
+    fi
+    local listing entries scope project
+    if ! listing="$(run_bounded "$REACHABLE_API_MAX_TIME" "$claude_bin" plugin list --json)"; then
+        print_error "claude plugin list --json failed; cannot check for the old Reachable plugin ($stale_id)"
+        exit 1
+    fi
+    entries="$(printf '%s' "$listing" | "$PY_BIN" -I -c '
+import json, sys
+for plugin in json.load(sys.stdin):
+    if plugin["id"] != sys.argv[1]:
+        continue
+    scope = plugin["scope"]
+    if scope == "user":
+        print("user\t")
+    elif scope in ("project", "local"):
+        print(scope + "\t" + plugin["projectPath"])
+    else:
+        raise SystemExit("unknown scope %r for %s" % (scope, sys.argv[1]))
+' "$stale_id")" || { print_error "could not read claude plugin list --json"; exit 1; }
+    while IFS=$'\t' read -r scope project; do
+        [[ -n "$scope" ]] || continue
+        if ! (cd "${project:-$HOME}" && run_bounded "$REACHABLE_API_MAX_TIME" "$claude_bin" plugin uninstall "$stale_id" --scope "$scope" >/dev/null); then
+            print_error "Could not remove the old Reachable plugin $stale_id ($scope scope)."
+            print_error "Remove it in Claude Code: /plugin uninstall $stale_id"
+            exit 1
+        fi
+        print_ok "Removed the old Reachable plugin $stale_id ($scope scope)"
+    done <<< "$entries"
+    if ! listing="$(run_bounded "$REACHABLE_API_MAX_TIME" "$claude_bin" plugin marketplace list --json)"; then
+        print_error "claude plugin marketplace list --json failed"
+        exit 1
+    fi
+    local present=0
+    printf '%s' "$listing" | "$PY_BIN" -I -c '
+import json, sys
+sys.exit(0 if any(m["name"] == sys.argv[1] for m in json.load(sys.stdin)) else 3)
+' "$stale_marketplace" || present=$?
+    if [[ $present -ne 0 && $present -ne 3 ]]; then
+        print_error "could not read claude plugin marketplace list --json"
+        exit 1
+    fi
+    if [[ $present -eq 0 ]]; then
+        if ! run_bounded "$REACHABLE_API_MAX_TIME" "$claude_bin" plugin marketplace remove "$stale_marketplace" >/dev/null; then
+            print_error "Could not remove the old Claude Code marketplace $stale_marketplace"
+            exit 1
+        fi
+        print_ok "Removed the old Claude Code marketplace $stale_marketplace"
+    fi
+}
+
 verify_installation() {
     print_header "Verification"
 
@@ -2937,6 +3006,7 @@ main() {
         return
     fi
     verify_installation
+    remove_stale_claude_plugin
     run_vibe_setup
     if [[ -n "$VIBE_SETUP_FAILED" ]]; then
         print_error "REACHABLE is installed but this workspace was NOT wired: $VIBE_SETUP_FAILED"
