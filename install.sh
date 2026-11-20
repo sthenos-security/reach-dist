@@ -2707,7 +2707,7 @@ run_vibe_setup() {
             ui_output="$("$reachctl_bin" vibe ui --repo "$workspace" --no-open 2>/dev/null || true)"
             VIBE_UI_URL="$(printf '%s\n' "$ui_output" | awk '/^https?:\/\// { url = $0 } END { print url }')"
             if [[ -n "$VIBE_UI_URL" ]]; then
-                print_info "Dashboard: $VIBE_UI_URL"
+                print_info "Reachable page: $(results_page_url "$VIBE_UI_URL")"
             fi
         elif [[ $vibe_rc -eq 3 ]]; then
             # wire-workspace's WIRE_WORKSPACE_HELD_EXIT: the agent-config guard
@@ -2718,9 +2718,11 @@ run_vibe_setup() {
             done
             VIBE_SETUP_FAILED="the agent-config guard held the agent (see the held: lines above and $INSTALL_LOG)"
         else
-            print_warn "reach-vibe setup failed, but reachable itself is installed (see $INSTALL_LOG)"
+            print_warn "Reachable is installed, but connecting it to this folder failed (see $INSTALL_LOG)"
             VIBE_SETUP_FAILED="reachctl vibe wire-workspace exited $vibe_rc (see $INSTALL_LOG)"
-            print_info "Retry later with: ${vibe_cmd[*]}"
+            # Run from the agent's setup: the user retries in the agent, never
+            # with a raw reachctl line (§16a rule 4).
+            print_info "To try again, say \`reachable: setup\`."
         fi
         rm -f "$vibe_log"
     elif run_bounded "$wire_limit" "${vibe_cmd[@]}"; then
@@ -2729,13 +2731,21 @@ run_vibe_setup() {
         ui_output="$("$reachctl_bin" vibe ui --repo "$workspace" --no-open 2>/dev/null || true)"
         VIBE_UI_URL="$(printf '%s\n' "$ui_output" | awk '/^https?:\/\// { url = $0 } END { print url }')"
         if [[ -n "$VIBE_UI_URL" ]]; then
-            print_info "Dashboard: $VIBE_UI_URL"
+            print_info "Reachable page: $(results_page_url "$VIBE_UI_URL")"
         fi
     else
         print_warn "reach-vibe setup failed, but REACHABLE itself is installed"
         VIBE_SETUP_FAILED="reachctl vibe wire-workspace exited non-zero (see $INSTALL_LOG)"
         print_info "Retry later with: ${vibe_cmd[*]}"
     fi
+}
+
+# The Reachable page at its Results tab (reach-core design §16a rule 4, b286
+# #6/#22): `reachctl vibe ui` prints the page root with ?workspace=.
+results_page_url() {
+    local base="${1%%\?*}"
+    local query="${1#"$base"}"
+    printf '%s/results%s\n' "${base%/}" "$query"
 }
 
 # -----------------------------------------------------------------------------
@@ -2803,7 +2813,7 @@ print_success() {
     echo ""
     if [[ "$compact_success" == true ]]; then
         if [[ -n "$VIBE_UI_URL" ]]; then
-            echo "  Dashboard: $VIBE_UI_URL"
+            echo "  Reachable page: $(results_page_url "$VIBE_UI_URL")"
         fi
         echo "  $surface_line"
         echo "  $path_hint"
@@ -2811,7 +2821,7 @@ print_success() {
             echo "  Install log: $INSTALL_LOG"
         fi
         if [[ "$ENABLE_VIBE_CODING" == true ]]; then
-            echo "  Next: run reachable: doctor in the agent."
+            echo "  Next: say \`reachable: settings\`"
         else
             echo "  Next: run reachctl doctor, then reachctl scan /path/to/repo."
         fi
@@ -2824,9 +2834,9 @@ print_success() {
     echo -e "  ${BOLD}Start Here:${NC}"
     if [[ "$ENABLE_VIBE_CODING" == true ]]; then
         if [[ -n "$VIBE_UI_URL" ]]; then
-            echo "    Dashboard: $VIBE_UI_URL"
+            echo "    Reachable page: $(results_page_url "$VIBE_UI_URL")"
         fi
-        echo "    reachctl vibe ui         # Open the local vibe dashboard"
+        echo "    reachctl vibe ui         # Open the Reachable page"
         echo "    reachctl vibe status     # Show daemon and latest scan state"
     else
         echo "    reachctl scan /path      # Scan a repository"

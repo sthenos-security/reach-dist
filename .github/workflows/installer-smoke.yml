@@ -55,6 +55,8 @@ jobs:
 
       - name: Downloads retry only transient failures, with a growing delay, and stop
         run: bash ./test-installer-download-retries.sh
+      - name: Installer summary names only the next command (agent setup)
+        run: bash ./test-installer-agent-next-line.sh
 
       - name: No GitHub token in any process argv
         run: bash ./test-installer-no-token-in-argv.sh
