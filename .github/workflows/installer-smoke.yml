@@ -57,6 +57,8 @@ jobs:
         run: bash ./test-installer-download-retries.sh
       - name: Installer summary names only the next command (agent setup)
         run: bash ./test-installer-agent-next-line.sh
+      - name: Installer keeps the verified vendor wheels for GuardDog repair
+        run: bash ./test-installer-keeps-vendor-wheels.sh
 
       - name: No GitHub token in any process argv
         run: bash ./test-installer-no-token-in-argv.sh
