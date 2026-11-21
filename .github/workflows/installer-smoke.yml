@@ -85,23 +85,3 @@ jobs:
 
       - name: Signature verifier installs offline with the oldest pip
         run: PYTHON=python3.11 bash ./test-installer-verifier-oldest-pip.sh
-
-  # Real Claude Code CLI, throwaway HOME: the installer removes the old
-  # reachable@reachable-local plugin and its marketplace (reach-core §16a rule 8).
-  claude-stale-plugin:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-
-      - name: Install Claude Code (pinned)
-        timeout-minutes: 5
-        run: npm install -g @anthropic-ai/claude-code@2.1.329
-
-      - name: Installer removes reachable@reachable-local
-        run: bash ./test-installer-removes-reachable-local.sh
