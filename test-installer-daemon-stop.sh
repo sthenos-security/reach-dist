@@ -63,30 +63,43 @@ grep -q 'managed runtime cannot run' <<<"$out" || fail "no-runtime case must say
 echo "PASS no runtime: warns and continues"
 
 # 5. P12 (b289 -> b290): an INSTALLED runtime whose `vibe daemon stop` crashes with
-#    PermissionError when TMPDIR points under ~/.reachable (reachctl sets it there; platformdirs
-#    refuses that runtime directory) and works with the system temp. The installer must stop it
-#    with the system temp, or a b289 user without XDG_RUNTIME_DIR / /run/user/<uid> can never
-#    upgrade (run 46043309009). The stub fails exactly like b289 does.
-mkdir -p "$HOME/.reachable/venv/bin" "$HOME/.reachable/tmp"
+#    PermissionError unless XDG_RUNTIME_DIR names a directory it accepts (a host with no
+#    XDG_RUNTIME_DIR and no /run/user/<uid>; reachctl keeps TMPDIR under ~/.reachable, so setting
+#    TMPDIR cannot help). The installer must give it /tmp/runtime-<uid> (0700), or a b289 user can
+#    never upgrade (run 46043309009). The stub fails exactly like b289 does, and ignores TMPDIR.
+mkdir -p "$HOME/.reachable/venv/bin"
 cat > "$HOME/.reachable/venv/bin/reachctl" <<'EOF2'
 #!/bin/sh
-echo "reachctl $* TMPDIR=${TMPDIR:-unset}" >> "$STUB_LOG"
+echo "reachctl $* XDG=${XDG_RUNTIME_DIR:-unset}" >> "$STUB_LOG"
 case "$*" in
   --version) echo "reachctl 1.0.0b289-stub" ;;
   "vibe daemon stop")
-    case "${TMPDIR:-}" in
-      "$HOME/.reachable"*) echo "PermissionError: runtime directory $TMPDIR/runtime-1002 is below $HOME/.reachable, writable by another user" >&2; exit 1 ;;
-      *) exit 0 ;;
-    esac ;;
+    if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+      echo "PermissionError: runtime directory $HOME/.reachable/tmp/runtime-1002 is below $HOME/.reachable, writable by another user; set XDG_RUNTIME_DIR instead" >&2; exit 1
+    fi
+    [ -d "$XDG_RUNTIME_DIR" ] && [ "$(stat -c %a "$XDG_RUNTIME_DIR" 2>/dev/null || stat -f %Lp "$XDG_RUNTIME_DIR")" = 700 ] || exit 1
+    exit 0 ;;
 esac
 EOF2
 chmod +x "$HOME/.reachable/venv/bin/reachctl"
 : > "$STUB_LOG"
-out="$(TMPDIR="$HOME/.reachable/tmp" TMP="$HOME/.reachable/tmp" TEMP="$HOME/.reachable/tmp" \
-  bash -c "source '$FUNCS'; stop_managed_daemon; echo reached-after-stop" 2>&1)" || fail "b289-style stop crashed the installer: $out"
-grep -q 'reached-after-stop' <<<"$out" || fail "installer did not continue after stopping a b289 runtime: $out"
-grep -q '^reachctl vibe daemon stop TMPDIR=/tmp$' "$STUB_LOG" || fail "the stop did not run with TMPDIR=/tmp: $(cat "$STUB_LOG")"
-echo "PASS a runtime that crashes under a REACHABLE_HOME temp is stopped with the system temp"
+want="/tmp/runtime-$(id -u)"
+rm -rf "$want"
+if [[ -d "/run/user/$(id -u)" ]]; then
+  echo "SKIP 5: this host has /run/user/$(id -u), so the installer leaves XDG_RUNTIME_DIR alone"
+else
+  out="$(env -u XDG_RUNTIME_DIR TMPDIR="$HOME/.reachable/tmp" bash -c "source '$FUNCS'; stop_managed_daemon; echo reached-after-stop" 2>&1)" \
+    || fail "b289-style stop crashed the installer: $out"
+  grep -q 'reached-after-stop' <<<"$out" || fail "installer did not continue after stopping a b289 runtime: $out"
+  grep -q "^reachctl vibe daemon stop XDG=$want\$" "$STUB_LOG" || fail "the stop did not run with XDG_RUNTIME_DIR=$want: $(cat "$STUB_LOG")"
+  echo "PASS a runtime that needs XDG_RUNTIME_DIR is stopped with $want (0700)"
+fi
+# A host that already has XDG_RUNTIME_DIR keeps it.
+: > "$STUB_LOG"
+mkdir -p "$WORK/xdg" && chmod 0700 "$WORK/xdg"
+XDG_RUNTIME_DIR="$WORK/xdg" bash -c "source '$FUNCS'; stop_managed_daemon" >/dev/null 2>&1 || fail "stop failed with a host-provided XDG_RUNTIME_DIR"
+grep -q "XDG=$WORK/xdg\$" "$STUB_LOG" || fail "the installer replaced the host's XDG_RUNTIME_DIR: $(cat "$STUB_LOG")"
+echo "PASS a host-provided XDG_RUNTIME_DIR is kept"
 
 # 4. Every removal site in install.sh is immediately preceded by the stop call.
 sites=0

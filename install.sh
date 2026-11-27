@@ -1285,15 +1285,25 @@ stop_managed_daemon() {
         return 0
     fi
     print_info "stopping the daemon before the runtime changes"
-    # The INSTALLED runtime runs this stop, whatever version it is. reachctl points TMPDIR under
-    # ~/.reachable for its children, and b289's runtime then crashed with PermissionError in
-    # platformdirs when the user has no XDG_RUNTIME_DIR and no /run/user/<uid> (ssh without a login
-    # session, su, containers): such a user could never upgrade (run 46043309009, design
-    # REMEDIATION-STATE-AND-OUTCOME-PATH-AMENDMENT.md P12). The system temp is where that runtime
-    # directory resolved before TMPDIR moved, so the stop looks for the daemon there.
-    if ! env TMPDIR=/tmp TMP=/tmp TEMP=/tmp "$reachctl" vibe daemon stop; then
+    # The INSTALLED runtime runs this stop, whatever version it is. On a host with no XDG_RUNTIME_DIR
+    # and no /run/user/<uid> (ssh without a login session, su, containers), b289's runtime crashed
+    # with PermissionError in platformdirs because reachctl points its temp folder under ~/.reachable
+    # and platformdirs refuses a runtime directory there: such a user could never upgrade (run
+    # 46043309009; design REMEDIATION-STATE-AND-OUTCOME-PATH-AMENDMENT.md P12). Setting TMPDIR does
+    # not help (reachctl resets it). Give the runtime a directory it accepts: the one the fixed
+    # runtime itself falls back to, /tmp/runtime-<uid>, owned by this user, mode 0700.
+    local run_env=()
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && ! -d "/run/user/$(id -u)" ]]; then
+        local fallback="/tmp/runtime-$(id -u)"
+        mkdir -p "$fallback" && chmod 0700 "$fallback" || {
+            print_error "could not create $fallback for the daemon stop"
+            exit 1
+        }
+        run_env=(env "XDG_RUNTIME_DIR=$fallback")
+    fi
+    if ! "${run_env[@]}" "$reachctl" vibe daemon stop; then
         print_error "could not stop the running daemon; refusing to replace the runtime under it"
-        print_info "Stop it (reachctl vibe daemon stop), or set XDG_RUNTIME_DIR to a folder you own, and rerun the installer."
+        print_info "Stop it (reachctl vibe daemon stop), or set XDG_RUNTIME_DIR to a folder you own (mode 0700), and rerun the installer."
         exit 1
     fi
 }
