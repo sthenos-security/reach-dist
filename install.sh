@@ -1285,9 +1285,15 @@ stop_managed_daemon() {
         return 0
     fi
     print_info "stopping the daemon before the runtime changes"
-    if ! "$reachctl" vibe daemon stop; then
+    # The INSTALLED runtime runs this stop, whatever version it is. reachctl points TMPDIR under
+    # ~/.reachable for its children, and b289's runtime then crashed with PermissionError in
+    # platformdirs when the user has no XDG_RUNTIME_DIR and no /run/user/<uid> (ssh without a login
+    # session, su, containers): such a user could never upgrade (run 46043309009, design
+    # REMEDIATION-STATE-AND-OUTCOME-PATH-AMENDMENT.md P12). The system temp is where that runtime
+    # directory resolved before TMPDIR moved, so the stop looks for the daemon there.
+    if ! env TMPDIR=/tmp TMP=/tmp TEMP=/tmp "$reachctl" vibe daemon stop; then
         print_error "could not stop the running daemon; refusing to replace the runtime under it"
-        print_info "Stop it (reachctl vibe daemon stop) and rerun the installer."
+        print_info "Stop it (reachctl vibe daemon stop), or set XDG_RUNTIME_DIR to a folder you own, and rerun the installer."
         exit 1
     fi
 }

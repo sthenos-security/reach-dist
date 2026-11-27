@@ -62,6 +62,32 @@ grep -q 'reached-after-stop' <<<"$out" || fail "no-runtime case must not abort: 
 grep -q 'managed runtime cannot run' <<<"$out" || fail "no-runtime case must say so: $out"
 echo "PASS no runtime: warns and continues"
 
+# 5. P12 (b289 -> b290): an INSTALLED runtime whose `vibe daemon stop` crashes with
+#    PermissionError when TMPDIR points under ~/.reachable (reachctl sets it there; platformdirs
+#    refuses that runtime directory) and works with the system temp. The installer must stop it
+#    with the system temp, or a b289 user without XDG_RUNTIME_DIR / /run/user/<uid> can never
+#    upgrade (run 46043309009). The stub fails exactly like b289 does.
+mkdir -p "$HOME/.reachable/venv/bin" "$HOME/.reachable/tmp"
+cat > "$HOME/.reachable/venv/bin/reachctl" <<'EOF2'
+#!/bin/sh
+echo "reachctl $* TMPDIR=${TMPDIR:-unset}" >> "$STUB_LOG"
+case "$*" in
+  --version) echo "reachctl 1.0.0b289-stub" ;;
+  "vibe daemon stop")
+    case "${TMPDIR:-}" in
+      "$HOME/.reachable"*) echo "PermissionError: runtime directory $TMPDIR/runtime-1002 is below $HOME/.reachable, writable by another user" >&2; exit 1 ;;
+      *) exit 0 ;;
+    esac ;;
+esac
+EOF2
+chmod +x "$HOME/.reachable/venv/bin/reachctl"
+: > "$STUB_LOG"
+out="$(TMPDIR="$HOME/.reachable/tmp" TMP="$HOME/.reachable/tmp" TEMP="$HOME/.reachable/tmp" \
+  bash -c "source '$FUNCS'; stop_managed_daemon; echo reached-after-stop" 2>&1)" || fail "b289-style stop crashed the installer: $out"
+grep -q 'reached-after-stop' <<<"$out" || fail "installer did not continue after stopping a b289 runtime: $out"
+grep -q '^reachctl vibe daemon stop TMPDIR=/tmp$' "$STUB_LOG" || fail "the stop did not run with TMPDIR=/tmp: $(cat "$STUB_LOG")"
+echo "PASS a runtime that crashes under a REACHABLE_HOME temp is stopped with the system temp"
+
 # 4. Every removal site in install.sh is immediately preceded by the stop call.
 sites=0
 while IFS= read -r line; do
