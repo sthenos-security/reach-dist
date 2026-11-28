@@ -3188,6 +3188,12 @@ if [[ "${REACHABLE_INSTALLER_SOURCE_ONLY:-}" != "1" ]]; then
     setup_install_log
 
     if [[ "${REACHABLE_INSTALLER_VERIFY_ONLY:-}" == "1" ]]; then
+        # verify_installation bounds doctor with run_bounded, which drives the timer from $PY_BIN; main resolves it,
+        # this mode skips main, so it resolves it here (it was unset and every verify-only run died on it).
+        if ! PY_BIN="$(resolve_python_bin)"; then
+            print_error "Python 3.11+ not found"
+            exit 1
+        fi
         verify_installation
     else
         main "$@"
