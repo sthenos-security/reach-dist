@@ -32,7 +32,8 @@ assert_line_count() {
     local needle="$2"
     local expected="$3"
     local actual
-    actual=$(grep -Fx "$needle" "$file" 2>/dev/null | wc -l | tr -d ' ')
+    # grep exits 1 on zero matches; under pipefail that ended the test silently, so count 0 could never be asserted.
+    actual=$({ grep -Fx "$needle" "$file" 2>/dev/null || true; } | wc -l | tr -d ' ')
     if [[ "$actual" != "$expected" ]]; then
         echo "expected $expected occurrence(s) in $file: $needle; found $actual" >&2
         echo "--- $file ---" >&2
@@ -43,6 +44,9 @@ assert_line_count() {
 
 HOME="$WORK_DIR/home"
 mkdir -p "$HOME/.reachable/venv/bin"
+# A real install always has reachctl in the venv; the PATH step links it into ~/.reachable/bin and refuses without it.
+printf '#!/bin/sh\nexit 0\n' > "$HOME/.reachable/venv/bin/reachctl"
+chmod +x "$HOME/.reachable/venv/bin/reachctl"
 export HOME
 export REACHABLE_INSTALLER_SOURCE_ONLY=1
 
@@ -107,7 +111,9 @@ mkdir -p "$WORK_DIR/bin"
 touch "$SHELL"
 export SHELL
 RC_FILE="$HOME/.zshrc"
-PATH_LINE='export PATH="$HOME/.reachable/venv/bin:$PATH"'
+PATH_LINE='export PATH="$HOME/.reachable/bin:$PATH"'
+# What installers before 2026-11-28 wrote: the venv's own bin on PATH. An upgrade replaces it with PATH_LINE.
+OLD_PATH_LINE='export PATH="$HOME/.reachable/venv/bin:$PATH"'
 
 configure_shell_path
 configure_shell_path
@@ -117,9 +123,9 @@ assert_line_count "$RC_FILE" "$PATH_LINE" "1"
 {
     echo "# existing user config"
     echo "# Added by REACHABLE installer"
-    echo "$PATH_LINE"
+    echo "$OLD_PATH_LINE"
     echo "# Added by REACHABLE installer"
-    echo "$PATH_LINE"
+    echo "$OLD_PATH_LINE"
     echo "export PATH=\"\$HOME/bin:\$PATH\""
 } > "$RC_FILE"
 
@@ -128,6 +134,7 @@ assert_contains "$RC_FILE" "# existing user config"
 assert_contains "$RC_FILE" 'export PATH="$HOME/bin:$PATH"'
 assert_line_count "$RC_FILE" "# Added by REACHABLE installer" "1"
 assert_line_count "$RC_FILE" "$PATH_LINE" "1"
+assert_line_count "$RC_FILE" "$OLD_PATH_LINE" "0"
 
 if ! selector_looks_like_version "1.0.0b139"; then
     echo "expected beta version selector to be recognized as a version" >&2

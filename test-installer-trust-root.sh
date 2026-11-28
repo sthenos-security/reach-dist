@@ -79,21 +79,23 @@ grep -Fq 'VERIFY_VENV="$(mktemp -d "$REACHABLE_TMP_ROOT/verify-venv.XXXXXX")"' "
 #     full verify < statement check < remove previous < create managed venv.
 full_line=$(grep -n '"$VERIFIER_PY" verify_release_manifest.py' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
 statement_line=$(grep -n 'if ! verify_current_release_statement "$VERSION"; then' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
-remove_line=$(grep -n 'print_step "Removing previous installation"' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
+# 2026-11-28: the previous runtime is set aside (venv.previous, restored if the install fails), not removed.
+remove_line=$(grep -n 'print_step "Replacing the previous installation"' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
 venv_line=$(grep -n '"$PY_BIN" -m venv "$HOME/.reachable/venv"' "$INSTALLER" | tail -1 | cut -d: -f1 || true)
 [[ -n "$full_line" && -n "$statement_line" && -n "$remove_line" && -n "$venv_line" ]] \
     || fail "could not locate full verify ($full_line), statement ($statement_line), removal ($remove_line), venv ($venv_line)"
 (( full_line < remove_line && statement_line < remove_line && remove_line < venv_line )) \
     || fail "the existing install is touched before the release is proven (verify $full_line, statement $statement_line, remove $remove_line, venv $venv_line)"
 
-# 6c. Removing the previous version is not allowed to fail silently: a
+# 6c. Setting the previous version aside is not allowed to fail silently: a
 #     failure there must stop the install while the old one is still in place
-#     (no-silent-fallback rule; reviewer, 2026-11-02).
-if grep -Fq 'uninstall_managed_reachable || true' "$INSTALLER"; then
-    fail "a failed removal of the previous version is ignored (uninstall_managed_reachable || true)"
+#     (no-silent-fallback rule; reviewer, 2026-11-02). The swap runs under
+#     `set -euo pipefail` and is never masked.
+if grep -Eq 'retire_previous_runtime[[:space:]]*(\|\||;[[:space:]]*true)' "$INSTALLER"; then
+    fail "a failed set-aside of the previous version is ignored (retire_previous_runtime || ...)"
 fi
-grep -Fq 'if ! uninstall_managed_reachable; then' "$INSTALLER" \
-    || fail "a failed removal of the previous version does not stop the install"
+grep -Fxq 'set -euo pipefail' "$INSTALLER" \
+    || fail "install.sh does not run under set -euo pipefail, so a failed set-aside would not stop it"
 
 # 7. Fail-closed: a failed bootstrap or failed full verification must exit.
 grep -A6 'Release verification FAILED' "$INSTALLER" | grep -Fq 'exit 1' \
