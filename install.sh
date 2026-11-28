@@ -530,6 +530,8 @@ UNINSTALL_NO_EXPORT=false
 # exited 0, which the plugin bootstrap read as "installed and wired".
 VIBE_SETUP_FAILED=""
 ASSUME_YES=false
+# --allow-root: run as uid 0 (a container that runs as root). Refused otherwise (TP-D3).
+ALLOW_ROOT=false
 VIBE_RUN_BASELINE=false
 VIBE_AGENTS=()
 VIBE_UI_URL=""
@@ -574,6 +576,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --yes|-y)
             ASSUME_YES=true
+            shift
+            ;;
+        --allow-root)
+            ALLOW_ROOT=true
             shift
             ;;
         --wheel|-w)
@@ -648,11 +654,16 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --update, -u       Upgrade existing installation (backs up data)"
-            echo "  --clean            Remove existing data before install"
+            echo "  --clean            Remove ~/.reachable (keys, settings, scan history, install"
+            echo "                     record) before install. Lists what goes and asks first;"
+            echo "                     with no terminal it needs --yes."
             echo "  --uninstall        Remove REACHABLE from this machine: agent plugins, MCP"
             echo "                     server, daemon, and ~/.reachable including scan history"
             echo "                     and credentials. Asks first; --yes skips the question."
-            echo "  --yes, -y          Answer yes to the --uninstall confirmation"
+            echo "  --yes, -y          Answer yes to the --uninstall or --clean confirmation"
+            echo "  --allow-root       Run as root (uid 0), installing for the root user. Refused"
+            echo "                     without it: as root the installer would leave root-owned"
+            echo "                     files in your ~/.reachable. For containers that run as root."
             echo "  --export PATH      With --uninstall: save scan history and settings first"
             echo "  --no-export        With --uninstall: remove without saving an export"
             echo "  --version, -v VER  Install specific version (e.g., 1.0.0b35)"
@@ -706,7 +717,7 @@ while [[ $# -gt 0 ]]; do
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --no-vibe  # CI runner: scanner only"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --list     # Show available versions"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --update   # Upgrade with backup"
-            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --clean    # Clean install"
+            echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --clean    # Clean install (asks first)"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --version 1.0.0b35"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --agent codex"
             echo "  curl -fsSL ${PUBLIC_INSTALL_URL} | bash -s -- --baseline"
@@ -1696,6 +1707,66 @@ detect_environment() {
 # No GitHub CLI or auth needed — reach-dist is public
 
 # -----------------------------------------------------------------------------
+# Refusals and confirmations
+# -----------------------------------------------------------------------------
+# Root is refused before any persistent change (installer test plan TP-D3: "root refused by default with an
+# `--allow-root` override"). 2026-11-28: `sudo ./install.sh` ran to the end and left root-owned files in the user's
+# ~/.reachable that the user's own later installs and the daemon could not update. A container that runs as root
+# installs for root and says so with --allow-root.
+refuse_root_unless_allowed() {
+    local uid
+    uid="$(id -u)"
+    if [[ "$uid" != "0" ]]; then
+        return 0
+    fi
+    if [[ "$ALLOW_ROOT" == true ]]; then
+        print_warn "Running as root (--allow-root): installing for the root user into $HOME/.reachable"
+        return 0
+    fi
+    print_error "Refusing to run as root: it would leave root-owned files in $HOME/.reachable that your user cannot update. Run it as your user, without sudo; a container that runs as root passes --allow-root. Nothing was changed."
+    exit 2
+}
+
+# One place answers "is there a terminal to ask on" and asks it: curl | bash has the script on stdin, so both use
+# /dev/tty (F-008). With no controlling terminal (CI, a plugin bootstrap, `ssh host cmd`) opening it fails.
+installer_has_tty() {
+    { : < /dev/tty; } 2>/dev/null
+}
+
+installer_ask_yes_no() {  # installer_ask_yes_no <question>; 0 on y/Y
+    local reply
+    read -p "  $1 [y/N] " -n 1 -r reply < /dev/tty
+    echo ""
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# --clean deletes keys, scan history and the install record. 2026-11-28: it ran `rm -rf "$HOME/.reachable"` with no
+# question. It now names what goes and needs a yes on a terminal, or --yes; with neither it refuses before the daemon
+# is stopped or anything is removed.
+confirm_clean_data() {
+    local target="$HOME/.reachable" entry
+    print_warn "--clean removes $target and everything in it:"
+    for entry in "$target"/* "$target"/.[!.]*; do
+        [[ -e "$entry" ]] || continue
+        print_info "  $entry"
+    done
+    print_info "That includes saved keys and settings, scan history and the install record."
+    print_info "Agent hooks and MCP entries that call Reachable are not removed; they do not work until this install finishes."
+    if [[ "$ASSUME_YES" == true ]]; then
+        print_info "--yes given: removing without asking."
+        return 0
+    fi
+    if ! installer_has_tty; then
+        print_error "--clean needs a yes and there is no terminal to ask. Pass --clean --yes to remove $target. Nothing was removed."
+        exit 2
+    fi
+    if ! installer_ask_yes_no "Remove $target?"; then
+        print_info "Clean install cancelled. Nothing was removed."
+        exit 1
+    fi
+}
+
+# -----------------------------------------------------------------------------
 # Handle Existing Installation
 # -----------------------------------------------------------------------------
 handle_existing_install() {
@@ -1786,15 +1857,13 @@ handle_existing_install() {
             # by name before anything changes. Until 2026-11-02 the read below ran
             # regardless and bash died on "/dev/tty: No such device or address"
             # (reach-core G24 run 41470868277, G15 run 41484582820).
-            if ! { : < /dev/tty; } 2>/dev/null; then
+            if ! installer_has_tty; then
                 print_error "REACHABLE v$INSTALLED_VERSION is already installed and there is no terminal to ask."
-                print_info "Pass --update to upgrade it (keeps data) or --clean to reinstall. Nothing was changed."
+                print_info "Pass --update to upgrade it (keeps data) or --clean --yes to remove its data and reinstall. Nothing was changed."
                 exit 2
             fi
             # F-008: read from /dev/tty so prompts work inside curl | bash (CWE-676)
-            read -p "  Continue with upgrade (keeps data)? [y/N] " -n 1 -r < /dev/tty
-            echo ""
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            if ! installer_ask_yes_no "Continue with upgrade (keeps data)?"; then
                 # Non-zero: nothing was installed, and a caller (the plugin
                 # bootstrap) must not read a declined upgrade as a finished one.
                 print_info "Installation cancelled. Nothing was changed."
@@ -1810,6 +1879,7 @@ handle_existing_install() {
         if [[ -n "${INSTALL_LOG:-}" && "$INSTALL_LOG" == "$HOME/.reachable/"* ]]; then
             refresh_install_log=true
         fi
+        confirm_clean_data
         print_step "Removing existing data (--clean)"
         stop_managed_daemon
         rm -rf "$HOME/.reachable"
@@ -3110,6 +3180,8 @@ main() {
 }
 
 if [[ "${REACHABLE_INSTALLER_SOURCE_ONLY:-}" != "1" ]]; then
+    # Before the install log or anything else is written (TP-D3).
+    refuse_root_unless_allowed
     if [[ "$UNINSTALL_MODE" == true ]]; then
         # No install log: it would be written into the directory being removed.
         run_uninstall

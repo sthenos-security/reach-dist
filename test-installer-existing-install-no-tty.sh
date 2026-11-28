@@ -49,7 +49,7 @@ set -e
 [[ $rc -eq 2 ]] || fail "expected exit 2 with no terminal, got $rc: $out"
 grep -q "ERROR REACHABLE v1.0.0b258 is already installed and there is no terminal to ask." <<<"$out" \
     || fail "the refusal does not say why: $out"
-grep -q "Pass --update to upgrade it (keeps data) or --clean to reinstall. Nothing was changed." <<<"$out" \
+grep -q "Pass --update to upgrade it (keeps data) or --clean --yes to remove its data and reinstall. Nothing was changed." <<<"$out" \
     || fail "the refusal does not name --update / --clean: $out"
 grep -q "/dev/tty" <<<"$out" && fail "bash's own /dev/tty error leaked instead of the refusal: $out"
 grep -q "REACHED-AFTER\|DAEMON-STOPPED" <<<"$out" && fail "the installer carried on: $out"
