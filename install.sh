@@ -1278,33 +1278,87 @@ uninstall_managed_reachable() {
 # before the venv is touched; `reachctl vibe wire-workspace` (run_vibe_setup)
 # starts it again on the new runtime, and restarts a survivor by itself when
 # the runtime identity it recorded no longer matches (reach_agent/cli.py).
+# The pid files a Reachable daemon can have, wherever the platform put its runtime folder. The daemon's pid file is
+# <runtime folder>/<name>/<name>.pid, <name> being reach-vibe (reach-agent for the legacy name).
+managed_daemon_pidfiles() {
+    local uid base name
+    uid="$(id -u)"
+    for base in "${XDG_RUNTIME_DIR:-}" "/run/user/$uid" "/tmp/runtime-$uid" \
+                "$HOME/.reachable/tmp/runtime-$uid" "$HOME/Library/Caches/TemporaryItems"; do
+        [[ -n "$base" ]] || continue
+        for name in reach-vibe reach-agent; do
+            [[ -r "$base/$name/$name.pid" ]] && echo "$base/$name/$name.pid"
+        done
+    done
+}
+
+# The pids of the daemon that runs out of the managed runtime. A pid is taken only when the process is alive AND
+# its command line runs out of the managed venv: a stale pid file whose pid another program has since reused is
+# never signalled (the identity check dpkg's start-stop-daemon does with --exec).
+managed_daemon_pids() {
+    local file pid args
+    while IFS= read -r file; do
+        [[ -n "$file" ]] || continue
+        pid="$(tr -d '[:space:]' < "$file" 2>/dev/null || true)"
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        kill -0 "$pid" 2>/dev/null || continue
+        args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+        [[ "$args" == *"$HOME/.reachable/venv/"* ]] && echo "$pid"
+    done < <(managed_daemon_pidfiles) | sort -u
+}
+
+managed_daemon_alive() {
+    local pid
+    for pid in "$@"; do
+        kill -0 "$pid" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# Wait until none of the pids is alive, at most $1 seconds. 0 when they are all gone.
+managed_daemon_wait() {
+    local seconds="$1" tries i
+    shift
+    tries=$((seconds * 5))
+    for ((i = 0; i < tries; i++)); do
+        managed_daemon_alive "$@" || return 0
+        sleep 0.2
+    done
+    managed_daemon_alive "$@" && return 1
+    return 0
+}
+
+# Stop the running daemon at the operating-system level, the way dpkg's start-stop-daemon does (--retry TERM/10/KILL/5):
+# SIGTERM, wait, SIGKILL, wait, and say so loudly if it is still there. The installed runtime is NEVER asked to stop
+# itself: an upgrade must not depend on the code it is replacing (a bug in the old release blocked every upgrade from
+# it, b289 on a Linux user with no runtime folder, run 46043309009). The daemon leads its own process group, so the
+# signal goes to the group and its scan workers stop with it.
 stop_managed_daemon() {
-    local reachctl="$HOME/.reachable/venv/bin/reachctl"
-    if [[ ! -x "$reachctl" ]] || ! "$reachctl" --version >/dev/null 2>&1; then
-        print_warn "managed runtime cannot run; a daemon it started (if any) is left for setup to restart"
+    local pids=() pid pgid target targets=()
+    while IFS= read -r pid; do
+        [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(managed_daemon_pids)
+    if [[ ${#pids[@]} -eq 0 ]]; then
+        print_info "no running Reachable daemon found"
         return 0
     fi
-    print_info "stopping the daemon before the runtime changes"
-    # The INSTALLED runtime runs this stop, whatever version it is. On a host with no XDG_RUNTIME_DIR
-    # and no /run/user/<uid> (ssh without a login session, su, containers), b289's runtime crashed
-    # with PermissionError in platformdirs because reachctl points its temp folder under ~/.reachable
-    # and platformdirs refuses a runtime directory there: such a user could never upgrade (run
-    # 46043309009; design REMEDIATION-STATE-AND-OUTCOME-PATH-AMENDMENT.md P12). Setting TMPDIR does
-    # not help (reachctl resets it). Give the runtime a directory it accepts: the one the fixed
-    # runtime itself falls back to, /tmp/runtime-<uid>, owned by this user, mode 0700.
-    local run_env=()
-    if [[ -z "${XDG_RUNTIME_DIR:-}" && ! -d "/run/user/$(id -u)" ]]; then
-        local fallback="/tmp/runtime-$(id -u)"
-        mkdir -p "$fallback" && chmod 0700 "$fallback" || {
-            print_error "could not create $fallback for the daemon stop"
+    print_info "stopping the Reachable daemon (pid ${pids[*]}) before the runtime changes"
+    for pid in "${pids[@]}"; do
+        pgid="$(ps -p "$pid" -o pgid= 2>/dev/null | tr -d '[:space:]')"
+        if [[ -n "$pgid" && "$pgid" == "$pid" ]]; then target="-$pgid"; else target="$pid"; fi
+        targets+=("$target")
+        kill -TERM -- "$target" 2>/dev/null || true
+    done
+    if ! managed_daemon_wait "${REACHABLE_DAEMON_STOP_TERM_SECONDS:-10}" "${pids[@]}"; then
+        print_warn "the daemon did not stop after SIGTERM; sending SIGKILL"
+        for target in "${targets[@]}"; do
+            kill -KILL -- "$target" 2>/dev/null || true
+        done
+        if ! managed_daemon_wait "${REACHABLE_DAEMON_STOP_KILL_SECONDS:-5}" "${pids[@]}"; then
+            print_error "the Reachable daemon (pid ${pids[*]}) refused to die; not replacing the runtime under it"
+            print_info "Stop it (kill -9 ${pids[*]}) and rerun the installer."
             exit 1
-        }
-        run_env=(env "XDG_RUNTIME_DIR=$fallback")
-    fi
-    if ! "${run_env[@]}" "$reachctl" vibe daemon stop; then
-        print_error "could not stop the running daemon; refusing to replace the runtime under it"
-        print_info "Stop it (reachctl vibe daemon stop), or set XDG_RUNTIME_DIR to a folder you own (mode 0700), and rerun the installer."
-        exit 1
+        fi
     fi
 }
 
