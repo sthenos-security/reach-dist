@@ -1537,14 +1537,34 @@ _shell_rc_path() {
     esac
 }
 
+# The user's PATH gets a launcher folder that holds only `reachctl` and `reachable`, never the venv's own bin: the
+# venv holds python3, pip and every tool Reachable installs, and with it on PATH they shadowed the user's own in every
+# shell and project (found 2026-11-28). Reachable itself calls its venv by absolute path.
+link_launchers() {
+    local bin_dir="$HOME/.reachable/bin" venv_bin="$HOME/.reachable/venv/bin" name
+    if [[ ! -x "$venv_bin/reachctl" ]]; then
+        print_error "No reachctl in $venv_bin: the install did not produce the runtime"
+        exit 1
+    fi
+    rm -rf "$bin_dir"
+    mkdir -p "$bin_dir"
+    for name in reachctl reachable; do
+        if [[ -e "$venv_bin/$name" ]]; then
+            ln -s "$venv_bin/$name" "$bin_dir/$name"
+        fi
+    done
+}
+
 configure_shell_path() {
-    local reach_path="$HOME/.reachable/venv/bin"
-    local path_line='export PATH="$HOME/.reachable/venv/bin:$PATH"'
+    local reach_path="$HOME/.reachable/bin"
+    local path_line='export PATH="$HOME/.reachable/bin:$PATH"'
+    local old_path_line='export PATH="$HOME/.reachable/venv/bin:$PATH"'
     local marker_line="# Added by REACHABLE installer"
     local rc_file
     local path_count
     local tmp_file
 
+    link_launchers
     case ":$PATH:" in
         *":$reach_path:"*) ;;
         *) export PATH="$reach_path:$PATH" ;;
@@ -1556,15 +1576,16 @@ configure_shell_path() {
     touch "$rc_file"
 
     path_count=$({ grep -Fx "$path_line" "$rc_file" 2>/dev/null || true; } | wc -l | tr -d ' ')
-    if [[ "$path_count" == "1" ]]; then
+    if [[ "$path_count" == "1" ]] && ! grep -Fxq "$old_path_line" "$rc_file"; then
         PATH_CONFIG_STATUS="already-configured"
         return
     fi
 
     tmp_file=$(mktemp "${TMPDIR:-/tmp}/reachable-path.XXXXXX")
-    awk -v marker="$marker_line" -v path_line="$path_line" '
+    awk -v marker="$marker_line" -v path_line="$path_line" -v old_line="$old_path_line" '
         $0 == marker { next }
         $0 == path_line { next }
+        $0 == old_line { next }
         { print }
     ' "$rc_file" > "$tmp_file"
     cat "$tmp_file" > "$rc_file"
