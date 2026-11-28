@@ -13,6 +13,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 FUNCS="$WORK/funcs.sh"
 awk '/^RUNTIME_RETIRED=0/{p=1} /^# The daemon runs on the managed venv/{p=0} p' "$ROOT_DIR/install.sh" > "$FUNCS"
 grep -q '^retire_previous_runtime() {' "$FUNCS" || fail "install.sh has no retire_previous_runtime"
+grep -q '^recover_interrupted_upgrade() {' "$FUNCS" || fail "install.sh has no recover_interrupted_upgrade"
 grep -q '^commit_runtime() {' "$FUNCS" || fail "install.sh has no commit_runtime"
 grep -q '^restore_previous_runtime_on_failure() {' "$FUNCS" || fail "install.sh has no restore_previous_runtime_on_failure"
 cat >> "$FUNCS" <<'EOT'
@@ -75,6 +76,16 @@ mkdir -p "$HOME/.reachable/venv.previous" && echo STALE > "$HOME/.reachable/venv
 run 'retire_previous_runtime; [[ "$(cat "$HOME/.reachable/venv.previous/MARKER")" == OLD ]]; commit_runtime' >/dev/null || fail "leftover: the stale backup replaced the working runtime"
 echo "PASS a stale backup never replaces a working runtime"
 
+# 4b. `--uninstall` after a kill: the same recovery puts the old runtime back so the uninstall has a runtime to run.
+new_home killed2
+run 'retire_previous_runtime; mkdir -p "$HOME/.reachable/venv/bin"; echo HALF > "$HOME/.reachable/venv/MARKER"; printf "#!/bin/sh\\nexit 1\\n" > "$HOME/.reachable/venv/bin/python"; chmod +x "$HOME/.reachable/venv/bin/python"; trap - EXIT; exit 0' >/dev/null || true
+out="$(run 'recover_interrupted_upgrade')" || fail "recover: failed: $out"
+[[ "$(marker)" == OLD ]] || fail "recover: the previous runtime is not back ($(marker)): $out"
+[[ ! -e "$HOME/.reachable/venv.previous" ]] || fail "recover: the backup name is still there"
+out="$(run 'recover_interrupted_upgrade')" || fail "recover with nothing to recover failed: $out"
+[[ "$(marker)" == OLD ]] || fail "recover with nothing to recover changed the runtime"
+echo "PASS recover_interrupted_upgrade restores the previous runtime, and does nothing when there is nothing to recover"
+
 # 5. First install: no venv, nothing to retire, no trap that could fail an install.
 export HOME="$WORK/first"; mkdir -p "$HOME/.reachable"
 run 'retire_previous_runtime; mkdir -p "$HOME/.reachable/venv"; commit_runtime; exit 0' >/dev/null || fail "first install failed"
@@ -84,6 +95,7 @@ echo "PASS a first install has nothing to retire"
 retire_sites="$(grep -c '^\s*retire_previous_runtime$' "$ROOT_DIR/install.sh")"
 commit_sites="$(grep -c '^\s*commit_runtime$' "$ROOT_DIR/install.sh")"
 [[ "$retire_sites" -ge 2 ]] || fail "expected a retire_previous_runtime call at each of the 2 upgrade sites, found $retire_sites"
+grep -qE '^\s*recover_interrupted_upgrade$' "$ROOT_DIR/install.sh" || fail "run_uninstall does not recover an interrupted upgrade"
 [[ "$commit_sites" -ge 3 ]] || fail "expected commit_runtime at the 3 success points (wheel, download, bundle), found $commit_sites"
 if grep -nE '^\s*if ! uninstall_managed_reachable; then' "$ROOT_DIR/install.sh" | grep -v 'uninstall_all' >/dev/null; then
   : # the explicit --uninstall flow still uses it; only the upgrade sites must not

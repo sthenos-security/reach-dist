@@ -1296,17 +1296,24 @@ restore_previous_runtime_on_failure() {
     return "$rc"
 }
 
+# A kill (power loss, Ctrl-C twice, the OOM killer) cannot run the failure trap and leaves venv.previous beside a
+# half-built venv. Called before an install and before an uninstall, it puts the previous runtime back.
+recover_interrupted_upgrade() {
+    local venv="$HOME/.reachable/venv" previous="$HOME/.reachable/venv.previous"
+    [[ -d "$previous" ]] || return 0
+    if runtime_is_complete "$venv"; then
+        rm -rf "$previous"      # left by an upgrade that finished; the runtime in place is the working one
+    else
+        print_warn "An earlier upgrade was interrupted: putting its previous runtime back before going on."
+        stop_managed_daemon
+        rm -rf "$venv"
+        mv "$previous" "$venv"
+    fi
+}
+
 retire_previous_runtime() {
     local venv="$HOME/.reachable/venv" previous="$HOME/.reachable/venv.previous"
-    if [[ -d "$previous" ]]; then
-        if runtime_is_complete "$venv"; then
-            rm -rf "$previous"      # left by an upgrade that finished; the runtime in place is the working one
-        else
-            print_warn "An earlier upgrade was interrupted: putting its previous runtime back before going on."
-            rm -rf "$venv"
-            mv "$previous" "$venv"
-        fi
-    fi
+    recover_interrupted_upgrade
     [[ -d "$venv" ]] || return 0
     mv "$venv" "$previous"
     RUNTIME_RETIRED=1
@@ -3017,6 +3024,7 @@ run_uninstall() {
         print_error "Choose --export PATH or --no-export, not both."
         exit 2
     fi
+    recover_interrupted_upgrade
     if [[ ! -x "$reachctl" ]]; then
         print_error "No REACHABLE runtime at $HOME/.reachable/venv; the uninstall runs through it."
         if [[ -e "$HOME/.reachable" ]]; then
