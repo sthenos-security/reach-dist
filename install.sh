@@ -1271,6 +1271,56 @@ uninstall_managed_reachable() {
     "$venv_python" -u -m pip uninstall reachable -y
 }
 
+# An upgrade never leaves the machine without a runtime. The old venv is moved aside to venv.previous (it cannot be
+# built next to the old one and renamed: a venv's scripts carry its own path), the new one is built at the real path,
+# a failure at any point puts the old one back, and success deletes it. `pip uninstall` first, then a new venv, left
+# nothing to run when pip or the network failed in between, and `--uninstall` then refused for want of a runtime.
+RUNTIME_RETIRED=0
+
+runtime_is_complete() {
+    "$1/bin/python" -c "import reachable" >/dev/null 2>&1
+}
+
+restore_previous_runtime_on_failure() {
+    local rc=$?
+    if [[ "$RUNTIME_RETIRED" == 1 && "$rc" -ne 0 ]]; then
+        # A hook may have started a daemon on the half-built venv since the install stopped it; it must not
+        # run under the venv that is about to be replaced. If it cannot be stopped the function says so and the
+        # old runtime still goes back: no runtime at all is worse.
+        stop_managed_daemon || print_error "Could not stop a daemon running on the half-built runtime."
+        rm -rf "$HOME/.reachable/venv"
+        mv "$HOME/.reachable/venv.previous" "$HOME/.reachable/venv"
+        RUNTIME_RETIRED=0
+        print_warn "The upgrade did not finish: the previous runtime is back in place."
+    fi
+    return "$rc"
+}
+
+retire_previous_runtime() {
+    local venv="$HOME/.reachable/venv" previous="$HOME/.reachable/venv.previous"
+    if [[ -d "$previous" ]]; then
+        if runtime_is_complete "$venv"; then
+            rm -rf "$previous"      # left by an upgrade that finished; the runtime in place is the working one
+        else
+            print_warn "An earlier upgrade was interrupted: putting its previous runtime back before going on."
+            rm -rf "$venv"
+            mv "$previous" "$venv"
+        fi
+    fi
+    [[ -d "$venv" ]] || return 0
+    mv "$venv" "$previous"
+    RUNTIME_RETIRED=1
+    trap restore_previous_runtime_on_failure EXIT
+}
+
+commit_runtime() {
+    if [[ "$RUNTIME_RETIRED" == 1 ]]; then
+        RUNTIME_RETIRED=0
+        trap - EXIT
+        rm -rf "$HOME/.reachable/venv.previous"
+    fi
+}
+
 # The daemon runs on the managed venv's python. Rebuilding that venv under a
 # running daemon leaves it executing deleted code: on 2026-10-26 (Linux,
 # b243) pid 12423 survived two venv rebuilds, its log stayed empty, and
@@ -1948,14 +1998,10 @@ download_and_install() {
         
         # Uninstall previous managed version
         if managed_reachable_version &> /dev/null; then
-            print_step "Removing previous installation"
+            print_step "Replacing the previous installation"
             stop_managed_daemon
-            if ! uninstall_managed_reachable; then
-                print_error "Removing the previous version failed (pip uninstall reachable) — aborting"
-                print_info "The previous install is still in place: nothing was replaced."
-                exit 1
-            fi
-            print_ok "Previous version removed"
+            retire_previous_runtime
+            print_ok "Previous version set aside (it comes back if this install fails)"
         fi
         
         # Install into venv
@@ -2020,6 +2066,7 @@ download_and_install() {
             exit 1
         fi
         print_ok "Installation complete"
+        commit_runtime
         # Write venv-initialized stamp for local wheel path
         if [[ "$HAS_VENDOR" == true ]]; then
             STAMP="$HOME/.reachable/venv/.vendor-stamp"
@@ -2301,15 +2348,10 @@ print("\n".join(
 
     # Uninstall previous managed version
     if managed_reachable_version &> /dev/null; then
-        print_step "Removing previous installation"
+        print_step "Replacing the previous installation"
         stop_managed_daemon
-        if ! uninstall_managed_reachable; then
-            print_error "Removing the previous version failed (pip uninstall reachable) — aborting"
-            print_info "The previous install is still in place: nothing was replaced."
-            print_info "Rerun the installer; if it fails again, report to info@sthenosec.com"
-            exit 1
-        fi
-        print_ok "Previous version removed"
+        retire_previous_runtime
+        print_ok "Previous version set aside (it comes back if this install fails)"
     fi
 
     # Install into venv
@@ -2387,6 +2429,7 @@ print("\n".join(
             exit 1
         fi
         print_ok "Installed offline from the bundle (hash-pinned, manifest-bound)"
+        commit_runtime
         configure_shell_path
         return
     fi
@@ -2421,6 +2464,7 @@ print("\n".join(
         exit 1
     fi
     print_ok "Installation complete"
+    commit_runtime
 
     # Write venv-initialized stamp — tells doctor not to re-resolve vendor packages.
     # Contains the list of vendor-installed packages so guarddog backfill skips them.
