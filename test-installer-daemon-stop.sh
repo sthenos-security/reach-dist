@@ -165,4 +165,33 @@ while IFS= read -r line; do
 done < <(grep -n -E '^\s*(rm -rf "\$HOME/\.reachable(/venv)?"|if ! uninstall_managed_reachable; then)$' "$ROOT_DIR/install.sh")
 [[ $sites -ge 4 ]] || fail "expected at least 4 runtime-removal sites in install.sh, found $sites"
 echo "PASS all $sites runtime-removal sites stop the daemon first"
+
+# 10. macOS: the daemon runs under the Homebrew/framework Python, so its command line carries NO path of the managed
+#     venv: `<framework>/Python.app/Contents/MacOS/Python -m reach_agent -v _daemon --repo <app>` (measured 2026-11-28 on
+#     the machine that hit the upgrade failure). The identity is the daemon command, as the product's own uninstall
+#     decides it, not a path. Without it the installer finds no daemon and replaces the venv under a live one.
+mkdir -p "$WORK/framework/Python.app/Contents/MacOS" "$WORK/app"
+cat > "$WORK/framework/Python.app/Contents/MacOS/Python" <<'EOF2'
+#!/bin/sh
+trap 'exit 0' TERM
+while :; do sleep 0.1; done
+EOF2
+chmod +x "$WORK/framework/Python.app/Contents/MacOS/Python"
+mac_pid="$(python3 -c 'import subprocess,sys; p=subprocess.Popen([sys.argv[1], "-m", "reach_agent", "-v", "_daemon", "--repo", sys.argv[2]], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); print(p.pid)' "$WORK/framework/Python.app/Contents/MacOS/Python" "$WORK/app")"
+echo "$mac_pid" >> "$PIDS_FILE"
+echo "$mac_pid" > "$PIDFILE"
+sleep 0.5
+alive "$mac_pid" || fail "macOS: the stand-in daemon did not start"
+out="$(stop)" || fail "macOS: stopping the daemon failed: $out"
+alive "$mac_pid" && fail "macOS: a daemon whose command line has no venv path was not stopped (it would run under a replaced venv)"
+echo "PASS a macOS daemon (framework Python, no venv path in its command line) is found and stopped"
+
+# 11. A program that only mentions reach_agent is not the daemon.
+sleep 300 & other=$!
+echo "$other" >> "$PIDS_FILE"
+echo "$other" > "$PIDFILE"
+out="$(stop)" || fail "a look-alike halted the installer: $out"
+alive "$other" || fail "a program that is not the daemon was killed"
+kill "$other" 2>/dev/null || true
+echo "PASS only the daemon command is matched"
 echo "OK"

@@ -1297,13 +1297,19 @@ managed_daemon_pidfiles() {
 # never signalled (the identity check dpkg's start-stop-daemon does with --exec).
 managed_daemon_pids() {
     local file pid args
+    local daemon_command_re='(^|[[:space:]])-m[[:space:]]+reach_agent([[:space:]]+-[^[:space:]]+)*[[:space:]]+_daemon([[:space:]]|$)'
     while IFS= read -r file; do
         [[ -n "$file" ]] || continue
         pid="$(tr -d '[:space:]' < "$file" 2>/dev/null || true)"
         [[ "$pid" =~ ^[0-9]+$ ]] || continue
         kill -0 "$pid" 2>/dev/null || continue
         args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-        [[ "$args" == *"$HOME/.reachable/venv/"* ]] && echo "$pid"
+        # The identity is the daemon command, as the product's own uninstall decides it
+        # (`<python> -m reach_agent [options] _daemon ...`): on macOS the daemon runs under the framework Python and its
+        # command line carries no path of the managed venv, so a venv-path match alone finds nothing there.
+        if [[ "$args" == *"$HOME/.reachable/venv/"* || "$args" =~ $daemon_command_re ]]; then
+            echo "$pid"
+        fi
     done < <(managed_daemon_pidfiles) | sort -u
 }
 
