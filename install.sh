@@ -1443,7 +1443,6 @@ run_pip_with_retries() {
     local display_label="$label"
     if [[ "$REACHABLE_INSTALLER_AGENT_SETUP" == "1" ]]; then
         case "$label" in
-            "Upgrading pip in managed venv") display_label="Preparing Python environment" ;;
             "Installing hash-pinned dependencies") display_label="Installing runtime dependencies" ;;
             "Installing vendor wheels") display_label="Installing platform wheels" ;;
             "Installing REACHABLE wheel") display_label="Installing reachable" ;;
@@ -2106,8 +2105,9 @@ download_and_install() {
         print_step "Installing reachable"
         "$PY_BIN" -m venv "$HOME/.reachable/venv"
         configure_venv_pip_config
-        run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
-            "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
+        # No `pip install --upgrade pip`: it was the one unpinned download from the index, run before the hash-pinned
+        # installs (2026-11-28 review, I-8). The venv's own pip (CPython 3.11+ ships 22.3 or newer) installs
+        # `--require-hashes -r`, as the air-gap bundle path always has. test-installer-no-pip-upgrade.sh.
 
         # Install vendor wheels if present (pre-compiled C extensions).
         # These are C packages (ruamel.yaml.clib, psutil, yara-python) built in CI
@@ -2335,10 +2335,9 @@ print("\n".join(
     fi
     VERIFIER_PY="$VERIFY_VENV/bin/python"
     configure_venv_pip_config "$VERIFY_VENV"
-    if ! bundle_mode_enabled; then
-        run_pip_with_retries "Upgrading pip in the verifier venv" "$REACHABLE_PIP_ATTEMPTS" \
-            "$VERIFIER_PY" -u -m pip install --upgrade pip
-    fi
+    # No `pip install --upgrade pip`: it was the one unpinned download from the index, run before the hash-pinned
+    # installs (2026-11-28 review, I-8). The venv's own pip (CPython 3.11+ ships 22.3 or newer) installs
+    # `--require-hashes -r`, as the air-gap bundle path always has. test-installer-no-pip-upgrade.sh.
 
     # constraints.txt was fetched with the trust artifacts and its sha384 was
     # already checked against the manifest by _bootstrap_openssl_verify. Its
@@ -2466,10 +2465,9 @@ print("\n".join(
         exit 1
     fi
     configure_venv_pip_config
-    if ! bundle_mode_enabled; then
-        run_pip_with_retries "Upgrading pip in managed venv" "$REACHABLE_PIP_ATTEMPTS" \
-            "$HOME/.reachable/venv/bin/python" -u -m pip install --upgrade pip
-    fi
+    # No `pip install --upgrade pip`: it was the one unpinned download from the index, run before the hash-pinned
+    # installs (2026-11-28 review, I-8). The venv's own pip (CPython 3.11+ ships 22.3 or newer) installs
+    # `--require-hashes -r`, as the air-gap bundle path always has. test-installer-no-pip-upgrade.sh.
 
     CONSTRAINTS_MODE="hash"
     print_ok "Dependency constraints verified (hash-pinned, manifest-bound)"
