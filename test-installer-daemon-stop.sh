@@ -11,9 +11,16 @@
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(mktemp -d)"
-CLEAN_PIDS=()
+# The stand-in daemons are started inside $(...) subshells, so their pids are recorded in a FILE: an array would be lost
+# with the subshell and a failing test would leak the processes (found 2026-11-28: one survived a failed run).
+PIDS_FILE="$WORK/started-pids"
+: > "$PIDS_FILE"
 cleanup() {
-  for p in ${CLEAN_PIDS[@]+"${CLEAN_PIDS[@]}"}; do kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null || true; done
+  local p
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null || true
+  done < "$PIDS_FILE"
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -60,7 +67,7 @@ chmod +x "$BIN/reach-daemon"
 start_daemon() { # start_daemon <mode> <pidfile> -> pid
   local pid
   pid="$(python3 -c 'import subprocess,sys; p=subprocess.Popen([sys.argv[1], sys.argv[2]], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); print(p.pid)' "$BIN/reach-daemon" "$1")"
-  CLEAN_PIDS+=("$pid")
+  echo "$pid" >> "$PIDS_FILE"
   mkdir -p "$(dirname "$2")"
   echo "$pid" > "$2"
   sleep 0.5   # the shell has started and installed its trap
@@ -100,7 +107,7 @@ echo "PASS a daemon that will not die halts the installer with a clear message"
 
 # 4. A stale pid file whose pid another program reused is never signalled (the identity check).
 sleep 300 & other=$!
-CLEAN_PIDS+=("$other")
+echo "$other" >> "$PIDS_FILE"
 echo "$other" > "$PIDFILE"
 out="$(stop)" || fail "a stale pid file halted the installer: $out"
 alive "$other" || fail "an unrelated program that reused the pid was killed"
@@ -130,8 +137,7 @@ uid="$(id -u)"
 if [[ -e "/tmp/runtime-$uid" ]]; then
   echo "SKIP 7: /tmp/runtime-$uid exists on this host and is not ours to touch"
 else
-  pid="$(env -u XDG_RUNTIME_DIR bash -c "$(declare -f start_daemon alive); BIN='$BIN'; CLEAN_PIDS=(); start_daemon term '/tmp/runtime-$uid/reach-vibe/reach-vibe.pid'")"
-  CLEAN_PIDS+=("$pid")
+  pid="$(env -u XDG_RUNTIME_DIR bash -c "$(declare -f start_daemon alive); BIN='$BIN'; PIDS_FILE='$PIDS_FILE'; start_daemon term '/tmp/runtime-$uid/reach-vibe/reach-vibe.pid'")"
   alive "$pid" || fail "bare host: the stand-in daemon did not start"
   out="$(env -u XDG_RUNTIME_DIR bash -c "set -euo pipefail; source '$FUNCS'; stop_managed_daemon; echo returned-from-stop" 2>&1)" || fail "bare host: $out"
   alive "$pid" && fail "bare host: the daemon survived"
